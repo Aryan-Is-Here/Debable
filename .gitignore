@@ -1,0 +1,44 @@
+# ---- Secrets & environment ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ---- Node / Next.js (frontend) ----
+node_modules/
+.next/
+out/
+.turbo/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# ---- Python (backend) ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- Databases / local data ----
+*.sqlite3
+*.db
+
+# ---- Editor / OS ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- Build / misc ----
+dist/
+build/
+*.log
