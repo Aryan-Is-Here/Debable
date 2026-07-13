@@ -81,3 +81,8 @@ export function getTrendingTopics(limit = 4): Topic[] {
     .sort((a, b) => b.activeDebaters - a.activeDebaters)
     .slice(0, limit);
 }
+
+/** Unique topic categories, alphabetically sorted, for the browse filter. */
+export function getCategories(): string[] {
+  return Array.from(new Set(mockTopics.map((topic) => topic.category))).sort();
+}
