@@ -37,3 +37,48 @@ export interface Topic {
   /** ISO-8601 creation timestamp. */
   createdAt: string;
 }
+
+/** A one-on-one debate session between two users on a topic. */
+export interface DebateRoom {
+  id: ID;
+  topic: Topic;
+  /** The two participants. In the prototype, `you` is the local viewer. */
+  you: UserSummary;
+  opponent: UserSummary;
+  /** ISO-8601 timestamp the debate started. */
+  startedAt: string;
+}
+
+/** Who authored a chat entry. `system` covers fact-check results and notices. */
+export type MessageAuthor = "you" | "opponent" | "system";
+
+/** A single text-chat entry within a debate room. */
+export interface ChatMessage {
+  id: ID;
+  author: MessageAuthor;
+  content: string;
+  /** ISO-8601 timestamp. */
+  createdAt: string;
+  /** Present when this message is an AI fact-check result. */
+  factCheck?: FactCheck;
+}
+
+/** Verdict returned by the on-demand AI fact-check. */
+export type FactCheckVerdict = "true" | "false" | "misleading" | "unverified";
+
+/** A cited source backing a fact-check verdict. */
+export interface FactCheckSource {
+  title: string;
+  url: string;
+}
+
+/** Result of an on-demand fact-check request (see docs/10-ai-fact-check-design.md). */
+export interface FactCheck {
+  id: ID;
+  claim: string;
+  verdict: FactCheckVerdict;
+  explanation: string;
+  sources: FactCheckSource[];
+  /** ISO-8601 timestamp. */
+  createdAt: string;
+}

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Users } from "lucide-react";
 
 import type { Topic, TopicStatus } from "@/lib/types";
+import { initials } from "@/lib/utils";
 import {
   Card,
   CardContent,
@@ -11,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 /** Maps a topic status to a Badge variant. */
@@ -22,10 +24,6 @@ const statusVariant: Record<
   open: "secondary",
   archived: "outline",
 };
-
-function initials(username: string): string {
-  return username.replace(/[^a-zA-Z]/g, "").slice(0, 2).toUpperCase() || "?";
-}
 
 interface TopicCardProps {
   topic: Topic;
@@ -43,7 +41,10 @@ export function TopicCard({ topic }: TopicCardProps) {
           </Badge>
         </div>
         <CardTitle className="mt-2 text-balance leading-snug">
-          <Link href={`/topics/${topic.id}`} className="hover:underline">
+          <Link
+            href={{ pathname: "/waiting", query: { topic: topic.id } }}
+            className="hover:underline"
+          >
             {topic.title}
           </Link>
         </CardTitle>
@@ -68,6 +69,16 @@ export function TopicCard({ topic }: TopicCardProps) {
           <Users className="size-4" />
           {topic.activeDebaters} waiting
         </span>
+        {topic.status !== "archived" && (
+          <Button
+            render={
+              <Link href={{ pathname: "/waiting", query: { topic: topic.id } }} />
+            }
+            size="sm"
+          >
+            Debate
+          </Button>
+        )}
       </CardFooter>
     </Card>
   );
