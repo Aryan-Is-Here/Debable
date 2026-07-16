@@ -7,6 +7,7 @@ import { MessagesSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { UserMenu } from "@/components/user-menu";
 
 /** Primary navigation targets. Some routes arrive in later Phase 1 sub-steps. */
 const navItems = [
@@ -55,6 +56,7 @@ export function SiteHeader() {
           <Button variant="outline" size="sm" disabled title="Available after Phase 2 (Clerk)">
             Sign in
           </Button>
+          <UserMenu />
         </div>
       </div>
     </header>

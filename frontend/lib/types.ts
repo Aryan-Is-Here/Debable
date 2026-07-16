@@ -82,3 +82,26 @@ export interface FactCheck {
   /** ISO-8601 timestamp. */
   createdAt: string;
 }
+
+/** A finished debate as listed in a user's history. */
+export interface DebateHistoryEntry {
+  id: ID;
+  topicTitle: string;
+  opponent: UserSummary;
+  /** Rating (1–5) the user received from this opponent, if any. */
+  ratingReceived: number | null;
+  /** ISO-8601 date of the debate. */
+  date: string;
+}
+
+/** Aggregated profile view for the Profile screen (UI-only shape). */
+export interface UserProfile {
+  user: UserSummary;
+  /** ISO-8601 date the account was created. */
+  joinedAt: string;
+  debatesCount: number;
+  /** Average rating received, null until first rating. */
+  averageRating: number | null;
+  createdTopics: Topic[];
+  history: DebateHistoryEntry[];
+}
