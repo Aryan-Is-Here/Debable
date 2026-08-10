@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 
 import { TopicBrowser } from "@/components/topic-browser";
-import { mockTopics } from "@/lib/mock/topics";
 
 export const metadata: Metadata = {
   title: "Browse topics",
@@ -18,7 +17,7 @@ export default function BrowsePage() {
         </p>
       </header>
 
-      <TopicBrowser topics={mockTopics} />
+      <TopicBrowser />
     </div>
   );
 }

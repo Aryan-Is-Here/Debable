@@ -5,11 +5,16 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { SignInButton, useAuth } from "@clerk/nextjs";
 
 import {
   createTopicSchema,
   type CreateTopicInput,
 } from "@/lib/validation/topic";
+import { TOPIC_CATEGORIES } from "@/lib/constants/categories";
+import { ApiError } from "@/services/api-client";
+import { createTopic, topicKeys } from "@/services/topics";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -28,34 +33,64 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-interface CreateTopicFormProps {
-  /** Category options offered in the select. */
-  categories: string[];
-}
-
-/**
- * Create Topic form. Phase 1 is mock-only: a valid submit simulates success
- * (toast + redirect to Browse) without hitting a backend. The zod schema is
- * shared and will back the real API call in a later phase.
- */
-export function CreateTopicForm({ categories }: CreateTopicFormProps) {
+/** Create Topic form. Submits to the real API and requires a signed-in user. */
+export function CreateTopicForm() {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const { isLoaded, isSignedIn, getToken } = useAuth();
 
   const {
     register,
     handleSubmit,
     control,
-    formState: { errors, isSubmitting },
+    setError,
+    formState: { errors },
   } = useForm<CreateTopicInput>({
     resolver: zodResolver(createTopicSchema),
-    defaultValues: { title: "", description: "", category: "" },
+    // category is left undefined so the Select shows its placeholder; the enum schema has
+    // no valid empty member to seed it with.
+    defaultValues: { title: "", description: "" },
+  });
+
+  const { mutateAsync, isPending } = useMutation({
+    mutationFn: async (values: CreateTopicInput) =>
+      createTopic(values, await getToken()),
+    onSuccess: async (topic) => {
+      // Drop every cached topic list so Browse shows the new row immediately.
+      await queryClient.invalidateQueries({ queryKey: topicKeys.all });
+      toast.success("Topic created", { description: topic.title });
+      router.push("/browse");
+    },
   });
 
   async function onSubmit(values: CreateTopicInput) {
-    // Mock submit — no backend in Phase 1. Simulate a short network delay.
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    toast.success("Topic created", { description: values.title });
-    router.push("/browse");
+    try {
+      await mutateAsync(values);
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "conflict") {
+        // Attach server-side conflicts to the field that caused them.
+        setError("title", { message: error.message });
+        return;
+      }
+      toast.error("Couldn't create topic", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    }
+  }
+
+  if (isLoaded && !isSignedIn) {
+    return (
+      <div className="flex flex-col items-start gap-3 rounded-lg border border-dashed border-border p-8">
+        <p className="font-medium">Sign in to create a topic</p>
+        <p className="text-sm text-muted-foreground">
+          Topics are attributed to their creator, so we need to know who you are. Browsing
+          stays open to everyone.
+        </p>
+        <SignInButton mode="modal">
+          <Button>Sign in</Button>
+        </SignInButton>
+      </div>
+    );
   }
 
   return (
@@ -96,12 +131,12 @@ export function CreateTopicForm({ categories }: CreateTopicFormProps) {
             control={control}
             name="category"
             render={({ field }) => (
-              <Select value={field.value} onValueChange={field.onChange}>
+              <Select value={field.value ?? ""} onValueChange={field.onChange}>
                 <SelectTrigger id="category" aria-invalid={!!errors.category}>
                   <SelectValue placeholder="Choose a category" />
                 </SelectTrigger>
                 <SelectContent>
-                  {categories.map((c) => (
+                  {TOPIC_CATEGORIES.map((c) => (
                     <SelectItem key={c} value={c}>
                       {c}
                     </SelectItem>
@@ -114,14 +149,14 @@ export function CreateTopicForm({ categories }: CreateTopicFormProps) {
         </Field>
 
         <div className="flex gap-3">
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting && <Loader2 className="size-4 animate-spin" />}
+          <Button type="submit" disabled={isPending}>
+            {isPending && <Loader2 className="size-4 animate-spin" />}
             Create topic
           </Button>
           <Button
             type="button"
             variant="ghost"
-            disabled={isSubmitting}
+            disabled={isPending}
             onClick={() => router.push("/browse")}
           >
             Cancel

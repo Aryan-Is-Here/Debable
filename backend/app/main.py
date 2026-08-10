@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -50,7 +51,10 @@ def _register_exception_handlers(app: FastAPI) -> None:
                 "error": {
                     "code": "validation_error",
                     "message": "Request validation failed.",
-                    "details": exc.errors(),
+                    # jsonable_encoder is required, not decorative: when a field validator
+                    # raises ValueError, Pydantic puts the exception object itself in the
+                    # error's `ctx`, which json.dumps cannot serialise.
+                    "details": jsonable_encoder(exc.errors()),
                 }
             },
         )

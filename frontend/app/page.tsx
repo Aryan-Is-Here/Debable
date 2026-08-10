@@ -2,8 +2,7 @@ import Link from "next/link";
 import { ArrowRight, ScanSearch, Sparkles, Video } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { TopicCard } from "@/components/topic-card";
-import { getTrendingTopics } from "@/lib/mock/topics";
+import { TrendingTopics } from "@/components/trending-topics";
 
 /** How-it-works items shown beneath the hero. */
 const steps = [
@@ -25,8 +24,6 @@ const steps = [
 ] as const;
 
 export default function HomePage() {
-  const trending = getTrendingTopics();
-
   return (
     <div className="mx-auto w-full max-w-6xl px-4 sm:px-6">
       {/* Hero */}
@@ -67,34 +64,7 @@ export default function HomePage() {
         ))}
       </section>
 
-      {/* Trending topics */}
-      <section className="py-16">
-        <div className="mb-6 flex items-end justify-between">
-          <div>
-            <h2 className="text-2xl font-semibold tracking-tight">
-              Trending topics
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              The debates people are lining up for right now.
-            </p>
-          </div>
-          <Button
-            render={<Link href="/browse" />}
-            variant="ghost"
-            size="sm"
-            className="hidden sm:inline-flex"
-          >
-            View all
-            <ArrowRight className="size-4" />
-          </Button>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {trending.map((topic) => (
-            <TopicCard key={topic.id} topic={topic} />
-          ))}
-        </div>
-      </section>
+      <TrendingTopics />
     </div>
   );
 }
