@@ -216,9 +216,9 @@ Whole stack in containers instead: `docker compose -f docker/docker-compose.yml 
 | 1 | Reports feature (PRD + `POST /report`) has **no DB table** in doc 04 | 9 | Add `Reports` table (id, room_id, reporter_id, reported_user_id, reason, created_at) |
 | 2 | `POST /match` mechanics undefined | 4 | Decide queue model (in-DB queue vs in-memory), delivery (poll vs WS) |
 | 3 | Chat transport: doc 05 REST vs `websocket/` dir | 6 | WS for delivery, persist via Messages table |
-| 6 | **`Topic.category` exists only in the frontend.** `lib/types.ts` marks it UI-only and Browse filters on it, but doc 04 has no such column — so category survives no round trip through the API. | 3 | Add a `category` column to `topics` (short enum or free text?) and mirror the allowed values in the zod schema. **Decide the value set before writing the Phase 3 migration.** |
+| 6 | **`Topic.category` exists only in the frontend.** `lib/types.ts` marks it UI-only and Browse filters on it, but doc 04 has no such column. Worse, `getCategories()` derives the list from *existing topics*, so against an empty database the Create form's select is empty and no topic can ever be created. | 3 | **Decided (2026-08-10):** indexed `varchar` column plus a single shared allowlist constant validated by both the zod schema and the backend. No Postgres enum and no `CHECK` constraint — the frontend select must know the list anyway, so a migration would add cost without adding protection. Values: Technology, Science, Politics, Economics, Society, Ethics, Health, Environment, Education, Culture (`Work` folds into Economics; remap the mock topic using it). |
 | 7 | **`Topic.activeDebaters` is a computed count**, not a stored column. | 3/4 | Derive it (count of waiting users per topic) once matchmaking exists; until then Browse shows a placeholder. Do not add a denormalised column without a reason. |
-| 8 | **Clerk is not configured yet.** `CLERK_ISSUER` is blank, so token verification correctly fails closed and no authenticated route can be exercised end to end. | 3 | Create the Clerk application, put the issuer in `backend/.env`, add the frontend keys, and confirm a real token verifies before building authenticated endpoints. |
+| 8 | Clerk configuration | 3 | **Resolved (2026-08-10).** Development instance `distinct-kitten-15.clerk.accounts.dev`; `CLERK_ISSUER` set in `backend/.env`, JWKS verified live through `ClerkTokenVerifier` (one RS256 key). Remaining Phase 3 work: add the publishable key to the frontend, mount `<ClerkProvider>`, replace the disabled "Sign in" button, and confirm a real session token verifies end to end. The session token must carry `email`, `username` and `image_url` claims (configured in the Clerk dashboard) — `get_current_user` reads exactly those. |
 
 ---
 
@@ -268,6 +268,7 @@ frontend stops being self-contained, so the seams matter more than the endpoints
 - **Phase 7 AI Fact Check:** isolated `app/ai/` service client + separate AI service (RAG over trusted sources, Claude); `POST /room/{id}/fact-check`; result broadcast into chat; replace `mockFactCheck`.
 - **Phase 8 Ratings:** `POST /room/{id}/rating`; wire RatingForm; enforce one rating per debater per room.
 - **Phase 9 Polish & Deploy:** resolve conflict #1 (Reports); `POST /report` + minimal UI; deploy per doc 09; a11y/dark-mode/QA pass.
+- **Phase 10 Professional UI/UX Redesign** *(added at Aryan's request, 2026-08-10)*: a full visual and interaction overhaul of every screen — design direction and visual identity, typography and spacing system, component polish, motion, empty/loading/error states, and a real responsive pass. Explicitly **last**, because redesigning screens whose behaviour is still moving means paying for the work twice. Everything up to Phase 9 should be judged on whether it *works*, not on whether it looks finished.
 
 Each phase: new branch, plan first, progress report at phase start, blueprint-conflict check, tests where appropriate, merge on green.
 

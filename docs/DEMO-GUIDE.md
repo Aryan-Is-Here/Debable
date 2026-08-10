@@ -144,12 +144,24 @@ The core hypothesis of the product. Judge quality, not just plumbing.
 - Try to rate the same debate twice — the second attempt must be refused.
 - Confirm the average rating on the profile updates correctly.
 
-### Phase 9 — Polish & Deploy
+### Phase 9 — Polish & Deploy *(function, not looks)*
 
 - Report a user and confirm the report is stored.
 - Full pass on a real phone, in both light and dark mode.
 - Tab through every screen using only the keyboard; nothing should be unreachable.
 - Then the same walkthrough against the deployed URLs rather than localhost.
+
+### Phase 10 — Professional UI/UX Redesign
+
+The one phase where "it looks unfinished" is the point of the review rather than a
+distraction from it. Until here, judge whether things **work**; from here, judge how they
+**look and feel**.
+
+- Walk the whole loop again and note anything that feels amateur, cramped or inconsistent.
+- Check every state, not just the happy one: empty lists, loading, errors, long topic titles,
+  a user with no avatar, a debate with no messages yet.
+- Real phone, both light and dark mode, and a slow connection.
+- Keyboard only, start to finish.
 
 ---
 
