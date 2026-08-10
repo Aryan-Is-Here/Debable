@@ -1,0 +1,55 @@
+# Local development stack.
+#
+#   docker compose -f docker/docker-compose.yml up -d db        # database only
+#   docker compose -f docker/docker-compose.yml up --build      # database + API
+#
+# Running only `db` and starting uvicorn on the host is the faster inner loop; the `api`
+# service exists so the container image stays exercised and CI/deploy can reuse it.
+
+name: debatematch
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: debatematch-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: debatematch
+      POSTGRES_PASSWORD: debatematch
+      POSTGRES_DB: debatematch
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U debatematch -d debatematch"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.backend
+    container_name: debatematch-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ENV: development
+      # `db` is the compose service name, not localhost, from inside the network.
+      DATABASE_URL: postgresql+psycopg://debatematch:debatematch@db:5432/debatematch
+      CORS_ORIGINS: http://localhost:3000
+      CLERK_ISSUER: ${CLERK_ISSUER:-}
+      CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}
+      CLERK_AUDIENCE: ${CLERK_AUDIENCE:-}
+      CLERK_AUTHORIZED_PARTIES: ${CLERK_AUTHORIZED_PARTIES:-http://localhost:3000}
+    ports:
+      - "8000:8000"
+    volumes:
+      # Live reload against the working tree during development.
+      - ../backend:/app
+
+volumes:
+  postgres_data:
