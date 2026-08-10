@@ -293,4 +293,4 @@ Each phase: new branch, plan first, progress report at phase start, blueprint-co
 
 ---
 
-*This handbook lives at `docs/PROJECT-HANDBOOK.md`. Shorter per-phase progress reports live in `docs/progress/`. Both are updated at each phase start.*
+*This handbook lives at `docs/PROJECT-HANDBOOK.md`. Shorter per-phase progress reports live in `docs/progress/`. Both are updated at each phase start. For running the project and checking each phase's output by hand, see `docs/DEMO-GUIDE.md`.*
