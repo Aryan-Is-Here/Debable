@@ -1,6 +1,6 @@
 # DebateMatch — Complete Project Handbook
 
-**Generated:** 2026-07-18 · **Project state:** Phase 1 complete, Phase 2 starting
+**Generated:** 2026-07-18 · **Last updated:** 2026-08-10 · **Project state:** Phases 1–2 complete, Phase 3 next
 **Repository:** https://github.com/Aryan-Is-Here/Debable
 **Local path:** `E:\Projects\Debable`
 
@@ -36,14 +36,14 @@ The blueprint in `docs/` (13 documents: PRD, architecture, database, API spec, U
 | Toasts | sonner | ✅ In use |
 | Server state | TanStack Query | ⏳ Planned (when real API exists) |
 | Client state | Zustand | ⏳ Planned (only if needed) |
-| Backend | FastAPI, SQLAlchemy, Alembic, PostgreSQL | 🔵 Phase 2 |
+| Backend | FastAPI, SQLAlchemy 2 (async), Alembic, PostgreSQL 16, uv | ✅ In use |
 | Video | LiveKit | ⏳ Phase 5 |
-| Auth | **Clerk** (decided; backend verifies Clerk JWTs) | ⏳ Phase 2 |
+| Auth | **Clerk** (backend verifies Clerk JWTs; no login endpoint) | ✅ Backend side done |
 | AI | RAG + LLM (default: Anthropic Claude), isolated service | ⏳ Phase 7 |
-| Local dev | Docker Compose (⚠️ Docker not yet installed — see §7) | 🔵 Phase 2 |
+| Local dev | Docker Compose (postgres:16 + api) | ✅ In use |
 | Deploy | Vercel (frontend), Railway/Fly.io (backend), Neon/Supabase (Postgres), LiveKit Cloud | ⏳ Phase 9 |
 
-**Toolchain on this machine:** Node v24.16, npm 11.13 (no pnpm) · Python 3.11.9, pip 26.1.2, uv 0.11.21 · **no Docker** · git with `gh` CLI absent (plain git + HTTPS remote works).
+**Toolchain on this machine:** Node v24.16, npm 12.0.2 (no pnpm) · Python 3.11.9, uv 0.11.21 · Docker 29.6.2 + Compose v5.3.1 (Docker Desktop, installed on `E:`) · git with `gh` CLI absent (plain git + HTTPS remote works).
 
 ---
 
@@ -62,11 +62,23 @@ E:\Projects\Debable          (git repo, remote: Aryan-Is-Here/Debable)
 │   ├── lib/                 types.ts, utils.ts, mock/, validation/
 │   ├── services/            (empty — future API client layer)
 │   └── styles/              (empty — globals live in app/globals.css)
-├── backend/                 FastAPI skeleton dirs, all empty (.gitkeep)
-│   ├── app/{api,core,models,schemas,services,repositories,db,websocket,ai,auth,utils}
-│   ├── tests/
-│   └── migrations/
-├── docker/                  (empty — compose files land Phase 2)
+├── backend/                 FastAPI service — COMPLETE for Phase 2
+│   ├── app/
+│   │   ├── main.py          App factory: CORS, lifespan, exception handlers
+│   │   ├── __main__.py      Dev entrypoint (`python -m app`) — see §5.11
+│   │   ├── core/            config.py, logging.py, errors.py, platform.py
+│   │   ├── db/              base.py (Base + mixins), session.py (engine, get_db)
+│   │   ├── models/          user, topic, debate_room, message, fact_check, rating
+│   │   ├── schemas/         health.py (Pydantic I/O models)
+│   │   ├── auth/            clerk.py, jwks.py, dependencies.py
+│   │   ├── api/v1/          router.py, health.py
+│   │   └── {services,repositories,websocket,ai,utils}/   (empty — later phases)
+│   ├── tests/               conftest + health/auth/jwks/config suites (31 tests)
+│   ├── migrations/          Alembic env + versions/0001_initial_schema.py
+│   ├── pyproject.toml       uv-managed deps, ruff + pytest config
+│   ├── alembic.ini
+│   └── .env.example
+├── docker/                  docker-compose.yml (db + api), Dockerfile.backend
 ├── .github/                 (empty — CI lands when useful)
 ├── shared/                  (empty — cross-cutting contracts if ever needed)
 └── scripts/                 (empty)
@@ -74,7 +86,7 @@ E:\Projects\Debable          (git repo, remote: Aryan-Is-Here/Debable)
 
 ---
 
-## 4. Everything built so far (Phase 0 + Phase 1)
+## 4. Everything built so far (Phases 0–2)
 
 ### Phase 0 — Planning ✅
 Repo scaffolded to the blueprint structure; blueprint extracted into `docs/`; git + GitHub wired; root `.gitignore` (Node+Python+env) and README. Opinionated configs (linters, CI, Docker) deliberately deferred to their phases.
@@ -99,6 +111,42 @@ Every screen renders from **typed mock data** — there is no backend yet. The e
 
 **shadcn primitives installed:** button, card, badge, avatar, dropdown-menu, separator, input, field, label, textarea, select, sonner, dialog, scroll-area, switch.
 
+### Phase 2 — Backend Foundation ✅ (branch `feature/backend-foundation`)
+
+A running FastAPI service with configuration, database, migrations, auth verification and
+health checks. No feature endpoints yet — those start in Phase 3.
+
+| Area | What exists | Key files |
+|---|---|---|
+| App shell | `create_app()` factory; CORS from settings; lifespan disposes the pool; docs/OpenAPI disabled in production | `app/main.py` |
+| Errors | `AppError` hierarchy (404/409/401/403/503) + handlers giving every failure one envelope: `{"error": {"code", "message", "details?"}}` | `app/core/errors.py`, `app/main.py` |
+| Config | pydantic-settings `Settings`; comma-separated env lists via `NoDecode` + a `before` validator; `.env.example` committed, `.env` ignored | `app/core/config.py` |
+| Logging | Readable lines in dev, one JSON object per record in production; uvicorn loggers re-parented onto ours | `app/core/logging.py` |
+| Database | Async engine (psycopg 3), memoised session factory, `get_db` that rolls back on exception and leaves commits to handlers | `app/db/session.py` |
+| Schema | 6 tables, UUID PKs (`gen_random_uuid()`), `created_at`/`updated_at` everywhere, `fact_checks.sources` JSONB, deterministic constraint naming convention | `app/db/base.py`, `app/models/*` |
+| Migrations | Alembic reading `DATABASE_URL` from the app's own settings; `0001_initial_schema`; verified with `alembic check` (no drift) and a `downgrade base` → `upgrade head` round trip | `migrations/`, `alembic.ini` |
+| Auth | Clerk JWT verification: async JWKS cache with TTL + rotation refetch; checks signature, expiry, issuer, `azp`, and `aud` when configured; **fails closed** if `CLERK_ISSUER` is unset. `get_current_user` lazily provisions the local `users` row (race-safe) | `app/auth/*` |
+| API | `/api/v1` router; `GET /api/v1/health` returns `{status, database, env, version}` and **503** when Postgres is unreachable | `app/api/v1/*` |
+| Docker | `postgres:16-alpine` with a healthcheck + an `api` service built from `Dockerfile.backend` (uv, layer-cached deps) | `docker/*`, `.dockerignore` |
+| Tests | 31 pytest tests — health (incl. the 503 path), config parsing, JWKS caching/rotation/failures, token verification (expired, wrong issuer, wrong key, wrong `azp`, wrong `aud`, no subject, garbage). No DB and no network needed | `tests/*` |
+
+**Schema decisions made here** (beyond the bare doc 04 column lists):
+
+- `users.clerk_user_id` unique — the join key to Clerk. Local rows are created on the first
+  authenticated request; a Clerk webhook can replace that later without touching call sites.
+- `fact_checks.explanation` added — doc 04 omits it but the UI renders it beside every verdict.
+- `topics.status` and `fact_checks.verdict` are native Postgres enums whose values mirror the
+  frontend's `lib/types.ts` unions exactly.
+- Constraints: `debate_rooms` rejects self-debates; `ratings` enforces score 1–5, no
+  self-review, and one rating per reviewer per room (the Phase 8 rule, in the schema already).
+- Delete rules: `CASCADE` from a room to its messages/fact-checks/ratings; `RESTRICT` on the
+  author/participant links so a user row cannot vanish out from under a debate transcript.
+
+**Verified end to end:** `alembic upgrade head` against the compose Postgres → `python -m app`
+→ `GET /api/v1/health` = 200 `{"status":"ok","database":"ok"}`; container stopped → 503 with
+`"database":"error"`; container restarted → 200 again; the same health check also passes from
+inside the built `api` image.
+
 ---
 
 ## 5. Conventions & gotchas (READ BEFORE CODING)
@@ -115,6 +163,11 @@ Every screen renders from **typed mock data** — there is no backend yet. The e
 7. **Git workflow:** one feature per branch (`feature/<name>`), explain plan → files → risks before implementing, commit with conventional messages, push, merge to `main` when the phase/feature is complete. Never force-push `main` — it has received direct edits from Aryan (README) twice; always `git fetch` + merge.
 8. **Windows quirks:** LF→CRLF warnings on commit are normal noise. No `.gitattributes` yet (optional improvement). Bash is available (Git Bash paths like `/tmp` work).
 9. **Communication style (per project init):** think like a senior engineer; explain plan, list files to change, call out risks before coding; recommend postponing non-MVP features; ask when requirements are ambiguous; don't overengineer.
+10. **Backend verification loop:** `uv run ruff check .` → `uv run ruff format --check .` → `uv run pytest` → for schema changes also `uv run alembic upgrade head` and `uv run alembic check` (must report no new operations). Nothing merges without all of them green.
+11. **⚠️ Windows + psycopg:** the async driver cannot run on Python's default `ProactorEventLoop`. Start the API with `uv run python -m app` (not bare `uvicorn`) — `app/core/platform.py` selects the selector policy before the loop is created, and `migrations/env.py` does the same. Linux/macOS/Docker are unaffected.
+12. **Config lists from env:** pydantic-settings JSON-decodes `list[str]` fields before validators run. Any new comma-separated setting must use the `CsvList` alias in `app/core/config.py`, otherwise `A,B` in `.env` raises a parse error at startup.
+13. **Errors:** raise `AppError` subclasses from services/repositories rather than `HTTPException`, so those layers stay framework-free and every response keeps the same envelope.
+14. **Migrations are hand-checkable:** after editing models, autogenerate or hand-write the revision, then prove equivalence with `alembic check`. Constraint names come from the naming convention in `app/db/base.py` — name new `CheckConstraint`s with the short form (`score_range`), not the full `ck_…` string, or the convention will double the prefix.
 
 ### How to run the frontend
 ```bash
@@ -126,6 +179,18 @@ npm run build      # production build + type-check
 ```
 Demo path: Browse → "Debate" on a card → wait ~4s → Enter debate → chat, Fact-check a claim → End debate → rate → Home. Try the theme toggle and mobile width.
 
+### How to run the backend
+```bash
+docker compose -f docker/docker-compose.yml up -d db     # Postgres 16 on :5432
+cd E:\Projects\Debable\backend
+cp .env.example .env      # first time only
+uv sync                   # first time only
+uv run alembic upgrade head
+uv run python -m app      # http://localhost:8000 — docs at /docs
+uv run pytest             # 31 tests, no DB or network required
+```
+Whole stack in containers instead: `docker compose -f docker/docker-compose.yml up -d --build`.
+
 ---
 
 ## 6. Decisions locked & open conflicts
@@ -133,10 +198,17 @@ Demo path: Browse → "Debate" on a card → wait ~4s → Enter debate → chat,
 ### Locked
 | Decision | Detail |
 |---|---|
-| Auth = Clerk | Client-side login UI from Clerk; backend verifies Clerk-issued JWTs; **drop `POST /auth/login`** from doc 05 in Phase 2 |
+| Auth = Clerk | Client-side login UI from Clerk; backend verifies Clerk-issued JWTs; `POST /auth/login` from doc 05 is **dropped** (done — no such endpoint exists) |
 | AI service isolation | Backend calls AI over HTTP; AI never listens continuously; LLM default = Anthropic Claude |
 | Frontend stack details | See §2/§5 — base-nova, npm, no src/ dir, `@/*` alias |
+| Backend stack details | uv + Python 3.11, async SQLAlchemy 2 over psycopg 3, ruff, pytest; API versioned under `/api/v1` |
 | Progress reports | A cumulative report is written to `docs/progress/` at the **start of every phase** and committed |
+
+### Resolved
+| # | Conflict / gap | Resolved in | Outcome |
+|---|---|---|---|
+| 4 | Schema gaps: no timestamps on Users/Topics; no `created_at` on Ratings; `FactChecks.sources` untyped | Phase 2 | `created_at`/`updated_at` on **every** table via `TimestampMixin`; `sources` is **JSONB** defaulting to `[]`. Also added `fact_checks.explanation` (the UI needs it) and `users.clerk_user_id`. |
+| 5 | Local Postgres — Docker wasn't installed | Phase 2 | **Docker Desktop installed** (on `E:`). `docker/docker-compose.yml` runs `postgres:16-alpine` with a healthcheck, plus an optional `api` service. |
 
 ### Open — resolve at the stated phase, never silently
 | # | Conflict / gap | Phase | Working proposal |
@@ -144,36 +216,52 @@ Demo path: Browse → "Debate" on a card → wait ~4s → Enter debate → chat,
 | 1 | Reports feature (PRD + `POST /report`) has **no DB table** in doc 04 | 9 | Add `Reports` table (id, room_id, reporter_id, reported_user_id, reason, created_at) |
 | 2 | `POST /match` mechanics undefined | 4 | Decide queue model (in-DB queue vs in-memory), delivery (poll vs WS) |
 | 3 | Chat transport: doc 05 REST vs `websocket/` dir | 6 | WS for delivery, persist via Messages table |
-| 4 | Schema gaps: no timestamps on Users/Topics; no `created_at` on Ratings; `FactChecks.sources` untyped | 2/3 | `created_at`/`updated_at` everywhere; `sources` = **JSONB** |
-| 5 | **⚠️ PENDING (blocks Phase 2): local Postgres.** Docker isn't installed. | 2 | Options: (a) install Docker Desktop — matches blueprint exactly; (b) hosted Neon Postgres free tier — no local Docker, compose file still written for CI/later; (c) SQLite — fastest but deviates, not recommended. **Aryan must pick before DB work starts.** |
+| 6 | **`Topic.category` exists only in the frontend.** `lib/types.ts` marks it UI-only and Browse filters on it, but doc 04 has no such column — so category survives no round trip through the API. | 3 | Add a `category` column to `topics` (short enum or free text?) and mirror the allowed values in the zod schema. **Decide the value set before writing the Phase 3 migration.** |
+| 7 | **`Topic.activeDebaters` is a computed count**, not a stored column. | 3/4 | Derive it (count of waiting users per topic) once matchmaking exists; until then Browse shows a placeholder. Do not add a denormalised column without a reason. |
+| 8 | **Clerk is not configured yet.** `CLERK_ISSUER` is blank, so token verification correctly fails closed and no authenticated route can be exercised end to end. | 3 | Create the Clerk application, put the issuer in `backend/.env`, add the frontend keys, and confirm a real token verifies before building authenticated endpoints. |
 
 ---
 
-## 7. How to continue — Phase 2 in extreme detail
+## 7. How to continue — Phase 3 in extreme detail
 
-**Goal:** Backend Foundation. A running FastAPI service with config, DB, migrations, auth verification, health check, and tests — no feature endpoints yet beyond health.
+**Goal:** Topics. The first real feature slice, end to end: create and list topics through the
+API, and replace the frontend's topic mocks with live data. This is also the phase where the
+frontend stops being self-contained, so the seams matter more than the endpoints do.
 
-**Branch:** `feature/backend-foundation`
+**Branch:** `feature/topics`
+
+### Decide before writing code
+1. **Conflict #6 — `category`.** Browse filters by it and Create requires it, but no column
+   exists. Pick a fixed set (enum, migration needed whenever it changes) or free text with a
+   curated list in the UI. Whatever you pick, the zod schema in
+   `frontend/lib/validation/topic.ts` and the backend validator must agree exactly.
+2. **Conflict #8 — Clerk.** `POST /topics` needs an authenticated creator, so the Clerk app has
+   to exist first: create it, set `CLERK_ISSUER` in `backend/.env`, add the publishable key to
+   the frontend, and verify one real token against `get_current_claims` before building on it.
+3. **Conflict #7 — `activeDebaters`.** Leave it out of the API for now, or return `0`. It is a
+   matchmaking-queue count and there is no queue until Phase 4.
 
 ### Step-by-step
-1. **Resolve conflict #5** (Postgres hosting — see §6). Everything below assumes a Postgres URL exists.
-2. **Python project setup** (`backend/`): use **uv** (installed) — `pyproject.toml` with fastapi, uvicorn, sqlalchemy, alembic, psycopg, pydantic-settings, httpx, pytest, ruff. Pin Python 3.11.
-3. **App skeleton** (`backend/app/`):
-   - `main.py` — FastAPI factory, CORS (allow `localhost:3000`), router mounting, exception handlers.
-   - `core/config.py` — pydantic-settings `Settings` from env (`DATABASE_URL`, `CLERK_*`, `ENV`); `.env.example` committed, `.env` ignored.
-   - `core/logging.py` — struct-ish logging setup.
-4. **Database layer** (`app/db/`): engine/session factory, `Base`, FastAPI dependency `get_db`.
-5. **Models** (`app/models/`) per doc 04 **with agreed fixes** (conflict #4): users, topics, debate_rooms, messages, fact_checks (sources JSONB), ratings — all with timestamps. Users carry `clerk_user_id` unique key (email/username synced from Clerk).
-6. **Alembic** (`backend/migrations/`): init, autogenerate initial migration, verify up/down.
-7. **Auth** (`app/auth/`): Clerk JWT verification dependency (JWKS fetch + cache, issuer/audience checks) → yields current user; **no login endpoint**.
-8. **API** (`app/api/`): versioned router `/api/v1`, `GET /api/v1/health` (checks DB connectivity).
-9. **Docker** (`docker/`): `docker-compose.yml` (postgres:16 + backend), `Dockerfile` for backend — written even if Docker isn't installed yet (used by CI/deploy later).
-10. **Tests** (`backend/tests/`): pytest + httpx `AsyncClient`; health test; auth-dependency unit test with a fake JWKS.
-11. **Verify:** `uv run pytest`, `uv run uvicorn app.main:app --reload` → `curl localhost:8000/api/v1/health`.
-12. **Commit → push → merge** when green; write nothing to `frontend/` in this phase.
+4. **Migration** for the `category` decision (plus any index Browse's filter needs).
+5. **Repository** (`app/repositories/topic.py`): query/persist functions taking an
+   `AsyncSession`. No FastAPI imports here.
+6. **Service** (`app/services/topic.py`): business rules — ownership, validation beyond field
+   shape, raising `AppError` subclasses.
+7. **Schemas** (`app/schemas/topic.py`): `TopicCreate`, `TopicRead`, `UserSummary`. Match
+   `frontend/lib/types.ts` field-for-field; that file *is* the contract.
+8. **Endpoints** (`app/api/v1/topics.py`): `POST /api/v1/topics` (auth required, creator from
+   `get_current_user`) and `GET /api/v1/topics` (public; search + category filter + pagination
+   server-side, since Browse currently filters client-side over mocks).
+9. **Tests:** repository/service tests against a real Postgres (a throwaway compose database or
+   a per-test transaction), plus endpoint tests with the auth dependency overridden.
+10. **Frontend wiring:** add TanStack Query + a `services/topics.ts` client returning existing
+    `lib/types.ts` shapes; swap `lib/mock/topics.ts` call-sites in Browse/Create/Home. Screens
+    should not need rewrites — if one does, the API shape drifted from the view-model.
+11. **Verify both sides:** backend loop from §5.10; frontend `npm run lint` + `npm run build`;
+    then click Browse → Create → Browse and confirm the new topic is really persisted.
+12. **Commit → push → merge** when green.
 
-### Phases 3–9 (summary map)
-- **Phase 3 Topics:** CRUD endpoints (`POST/GET /topics`), repository pattern, wire frontend Browse/Create to real API via `services/` + TanStack Query; keep zod schema aligned with backend validation.
+### Phases 4–9 (summary map)
 - **Phase 4 Matchmaking:** resolve conflict #2; `POST /match` + queue; Waiting Room polls/WS; creates DebateRooms.
 - **Phase 5 Video:** LiveKit Cloud; backend mints room tokens; replace `VideoTile` mock with LiveKit React components.
 - **Phase 6 Chat:** resolve conflict #3; WS endpoint in `app/websocket/`; persist Messages; swap ChatPanel mock transport.
@@ -200,6 +288,8 @@ Each phase: new branch, plan first, progress report at phase start, blueprint-co
 | `f23bdbf` / `bdf7ad9` | Aryan: README cleanup/enhancement |
 | `6799bfb` | Merge remote README updates |
 | `2f7f2b1` | docs: Phase 2 start progress report |
+| `1ce336f` | docs: comprehensive project handbook |
+| `32d95f3` | feat(backend): Phase 2 backend foundation — **Phase 2 complete** (on `feature/backend-foundation`) |
 
 ---
 

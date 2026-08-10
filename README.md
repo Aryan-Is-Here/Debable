@@ -19,7 +19,7 @@ debate-match/
 ├── docs/         # Blueprint — source of truth
 ├── frontend/     # Next.js + React + TypeScript + Tailwind + shadcn/ui
 ├── backend/      # FastAPI + SQLAlchemy + Alembic + PostgreSQL
-├── docker/       # Docker / docker-compose (added at its phase)
+├── docker/       # docker-compose (Postgres 16 + API) and the backend Dockerfile
 ├── shared/       # Cross-cutting shared types/contracts
 ├── scripts/      # Dev & ops scripts
 └── .github/      # CI workflows (added at its phase)
@@ -38,6 +38,25 @@ debate-match/
 
 ## Status
 
-Scaffold only — modular folder skeleton in place. Feature work proceeds **strictly sequentially by
-roadmap phase**, one feature per branch, with a plan reviewed before each module is implemented.
+**Phase 1 (UI prototype) and Phase 2 (backend foundation) are complete; Phase 3 (Topics) is next.**
+The frontend renders every screen from typed mock data, and the backend runs with configuration,
+migrations, Clerk JWT verification and a health endpoint — but the two are not wired together yet.
+Feature work proceeds **strictly sequentially by roadmap phase**, one feature per branch, with a
+plan reviewed before each module is implemented.
+
+See [`docs/PROJECT-HANDBOOK.md`](./docs/PROJECT-HANDBOOK.md) for the full picture and
+[`docs/progress/`](./docs/progress) for per-phase reports.
+
+## Running it locally
+
+```bash
+# Frontend — http://localhost:3000
+cd frontend && npm install && npm run dev
+
+# Backend — http://localhost:8000 (needs Docker for Postgres)
+docker compose -f docker/docker-compose.yml up -d db
+cd backend && cp .env.example .env && uv sync
+uv run alembic upgrade head
+uv run python -m app
+```
 #
