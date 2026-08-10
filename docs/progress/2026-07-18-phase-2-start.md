@@ -1,4 +1,4 @@
-# DebateMatch — Progress Report
+# Debable — Progress Report
 
 **Report date:** 2026-07-18 · **Milestone:** Start of Phase 2 (Backend Foundation)
 **Repository:** https://github.com/Aryan-Is-Here/Debable

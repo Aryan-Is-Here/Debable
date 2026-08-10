@@ -6,23 +6,23 @@
 # Running only `db` and starting uvicorn on the host is the faster inner loop; the `api`
 # service exists so the container image stays exercised and CI/deploy can reuse it.
 
-name: debatematch
+name: debable
 
 services:
   db:
     image: postgres:16-alpine
-    container_name: debatematch-db
+    container_name: debable-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: debatematch
-      POSTGRES_PASSWORD: debatematch
-      POSTGRES_DB: debatematch
+      POSTGRES_USER: debable
+      POSTGRES_PASSWORD: debable
+      POSTGRES_DB: debable
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U debatematch -d debatematch"]
+      test: ["CMD-SHELL", "pg_isready -U debable -d debable"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -31,7 +31,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.backend
-    container_name: debatematch-api
+    container_name: debable-api
     restart: unless-stopped
     depends_on:
       db:
@@ -39,7 +39,7 @@ services:
     environment:
       ENV: development
       # `db` is the compose service name, not localhost, from inside the network.
-      DATABASE_URL: postgresql+psycopg://debatematch:debatematch@db:5432/debatematch
+      DATABASE_URL: postgresql+psycopg://debable:debable@db:5432/debable
       CORS_ORIGINS: http://localhost:3000
       CLERK_ISSUER: ${CLERK_ISSUER:-}
       CLERK_JWKS_URL: ${CLERK_JWKS_URL:-}

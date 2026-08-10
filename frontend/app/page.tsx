@@ -39,7 +39,7 @@ export default function HomePage() {
           Debate strangers on topics that actually matter
         </h1>
         <p className="max-w-2xl text-pretty text-lg text-muted-foreground">
-          DebateMatch pairs you with someone on the opposite side of a topic —
+          Debable pairs you with someone on the opposite side of a topic —
           then lets either of you fact-check any claim on demand, mid-conversation.
         </p>
         <div className="flex flex-col gap-3 sm:flex-row">

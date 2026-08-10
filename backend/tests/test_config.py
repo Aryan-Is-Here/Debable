@@ -8,9 +8,9 @@ def _settings(**overrides: object) -> Settings:
 
 
 def test_comma_separated_origins_become_a_list() -> None:
-    settings = _settings(cors_origins="http://localhost:3000, https://debatematch.app")
+    settings = _settings(cors_origins="http://localhost:3000, https://debable.app")
 
-    assert settings.cors_origins == ["http://localhost:3000", "https://debatematch.app"]
+    assert settings.cors_origins == ["http://localhost:3000", "https://debable.app"]
 
 
 def test_blank_entries_in_a_csv_value_are_dropped() -> None:

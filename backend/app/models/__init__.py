@@ -1,4 +1,4 @@
-"""SQLAlchemy models for the DebateMatch schema (see ``docs/04-database-design.md``).
+"""SQLAlchemy models for the Debable schema (see ``docs/04-database-design.md``).
 
 Importing this package registers every model on ``Base.metadata``, which is what Alembic
 autogenerate and the test harness rely on. Import the package, not individual modules.

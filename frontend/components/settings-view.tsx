@@ -53,7 +53,7 @@ export function SettingsView() {
       <Card>
         <CardHeader>
           <CardTitle>Appearance</CardTitle>
-          <CardDescription>How DebateMatch looks on this device.</CardDescription>
+          <CardDescription>How Debable looks on this device.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-3 gap-3" role="radiogroup" aria-label="Theme">

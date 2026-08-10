@@ -29,10 +29,10 @@ API_V1_PREFIX = "/api/v1"
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
-    logger.info("Starting DebateMatch backend", extra={"env": settings.env, "version": __version__})
+    logger.info("Starting Debable backend", extra={"env": settings.env, "version": __version__})
     yield
     await dispose_engine()
-    logger.info("Stopped DebateMatch backend")
+    logger.info("Stopped Debable backend")
 
 
 def _register_exception_handlers(app: FastAPI) -> None:
@@ -80,7 +80,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     configure_logging(settings)
 
     app = FastAPI(
-        title="DebateMatch API",
+        title="Debable API",
         version=__version__,
         summary="Topic-based video debates with on-demand AI fact-checking.",
         # Interactive docs are a development convenience, not a production surface.

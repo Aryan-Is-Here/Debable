@@ -1,7 +1,7 @@
 [project]
-name = "debatematch-backend"
+name = "debable-backend"
 version = "0.1.0"
-description = "DebateMatch backend — FastAPI service for topic-based video debates with on-demand AI fact-checking."
+description = "Debable backend — FastAPI service for topic-based video debates with on-demand AI fact-checking."
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [
