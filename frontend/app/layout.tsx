@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "DebateMatch",
-    template: "%s · DebateMatch",
+    default: "Debable",
+    template: "%s · Debable",
   },
   description:
     "Debate strangers on topics you care about — with on-demand AI fact-checking.",

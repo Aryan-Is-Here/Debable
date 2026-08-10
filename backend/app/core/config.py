@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     # --- Database ---
-    database_url: str = "postgresql+psycopg://debatematch:debatematch@localhost:5432/debatematch"
+    database_url: str = "postgresql+psycopg://debable:debable@localhost:5432/debable"
     db_echo: bool = False
     db_pool_size: int = 5
     db_max_overflow: int = 10

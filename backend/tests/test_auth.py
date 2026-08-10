@@ -160,11 +160,11 @@ async def test_audience_is_checked_when_configured(
         _env_file=None,  # type: ignore[call-arg]
         env="test",
         clerk_issuer=TEST_ISSUER,
-        clerk_audience="debatematch-api",
+        clerk_audience="debable-api",
     )
     verifier = ClerkTokenVerifier(settings, jwks=jwks)
 
-    accepted = await verifier.verify(make_token(private_key, aud="debatematch-api"))
+    accepted = await verifier.verify(make_token(private_key, aud="debable-api"))
     assert accepted.clerk_user_id == "user_2abcDEF"
 
     with pytest.raises(AuthenticationError):

@@ -24,7 +24,7 @@ export function SiteHeader() {
       <div className="mx-auto flex h-16 w-full max-w-6xl items-center gap-6 px-4 sm:px-6">
         <Link href="/" className="flex items-center gap-2 font-semibold">
           <MessagesSquare className="size-5 text-primary" />
-          <span>DebateMatch</span>
+          <span>Debable</span>
         </Link>
 
         <nav className="hidden items-center gap-1 sm:flex">

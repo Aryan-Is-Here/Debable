@@ -1,6 +1,6 @@
-# DebateMatch Backend
+# Debable Backend
 
-FastAPI service backing the DebateMatch platform. Phase 2 delivers the foundation only:
+FastAPI service backing the Debable platform. Phase 2 delivers the foundation only:
 configuration, logging, database layer, models, migrations, Clerk JWT verification and a
 health endpoint. Feature endpoints arrive from Phase 3 onward.
 

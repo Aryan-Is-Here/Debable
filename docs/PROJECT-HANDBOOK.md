@@ -1,16 +1,16 @@
-# DebateMatch — Complete Project Handbook
+# Debable — Complete Project Handbook
 
 **Generated:** 2026-07-18 · **Last updated:** 2026-08-10 · **Project state:** Phases 1–2 complete, Phase 3 next
 **Repository:** https://github.com/Aryan-Is-Here/Debable
 **Local path:** `E:\Projects\Debable`
 
-This is the full project reference: what DebateMatch is, everything built so far, every decision made, and exactly how to continue — written so that anyone (a new developer, a future AI session, or you after a break) can pick the project up from this document alone.
+This is the full project reference: what Debable is, everything built so far, every decision made, and exactly how to continue — written so that anyone (a new developer, a future AI session, or you after a break) can pick the project up from this document alone.
 
 ---
 
-## 1. What DebateMatch is
+## 1. What Debable is
 
-DebateMatch is a **random video debate platform** where strangers are matched by **debate topic** instead of random interests. Its differentiator is an **on-demand AI fact-checking assistant**: during a debate, either participant can submit one specific claim; the backend sends only that claim to an isolated AI service, which verifies it against trusted sources and posts the verdict into the debate chat.
+Debable is a **random video debate platform** where strangers are matched by **debate topic** instead of random interests. Its differentiator is an **on-demand AI fact-checking assistant**: during a debate, either participant can submit one specific claim; the backend sends only that claim to an isolated AI service, which verifies it against trusted sources and posts the verdict into the debate chat.
 
 **MVP hypothesis being validated:** *Can AI-assisted fact-checking improve online debates?* Everything else is secondary.
 

@@ -1,6 +1,6 @@
-# DebateMatch Blueprint
+# Debable Blueprint
 
-This repository contains the planning documents for building the DebateMatch MVP using AI-assisted development.
+This repository contains the planning documents for building the Debable MVP using AI-assisted development.
 
 Suggested implementation order:
 

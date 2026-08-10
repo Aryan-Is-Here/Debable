@@ -1,5 +1,5 @@
 /**
- * Frontend domain view-models for the DebateMatch UI prototype.
+ * Frontend domain view-models for the Debable UI prototype.
  *
  * These types back the mock data used by Phase 1 screens. Persisted fields map
  * to the database design in `docs/04-database-design.md`; a few fields are
