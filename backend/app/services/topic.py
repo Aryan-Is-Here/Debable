@@ -2,11 +2,13 @@
 
 import logging
 import uuid
+from collections.abc import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError
 from app.models.topic import Topic, TopicStatus
+from app.repositories import match as match_repo
 from app.repositories import topic as topic_repo
 from app.schemas.common import Page
 from app.schemas.topic import TopicCreate, TopicRead
@@ -40,11 +42,26 @@ async def list_topics(
         offset=offset,
     )
     return Page[TopicRead](
-        items=[TopicRead.model_validate(topic) for topic in topics],
+        items=await _with_waiting_counts(db, topics),
         total=total,
         limit=limit,
         offset=offset,
     )
+
+
+async def _with_waiting_counts(db: AsyncSession, topics: Sequence[Topic]) -> list[TopicRead]:
+    """Attach live queue sizes to a page of topics.
+
+    One grouped count for the whole page rather than a count per row — this is rendered on
+    every card in Browse.
+    """
+    counts = await match_repo.waiting_counts(db, [topic.id for topic in topics])
+    return [
+        TopicRead.model_validate(topic).model_copy(
+            update={"active_debaters": counts.get(topic.id, 0)}
+        )
+        for topic in topics
+    ]
 
 
 async def get_topic(db: AsyncSession, topic_id: uuid.UUID) -> TopicRead:
@@ -52,7 +69,7 @@ async def get_topic(db: AsyncSession, topic_id: uuid.UUID) -> TopicRead:
     topic = await topic_repo.get_topic(db, topic_id)
     if topic is None:
         raise NotFoundError("Topic not found.")
-    return TopicRead.model_validate(topic)
+    return (await _with_waiting_counts(db, [topic]))[0]
 
 
 async def create_topic(db: AsyncSession, payload: TopicCreate, creator_id: uuid.UUID) -> TopicRead:

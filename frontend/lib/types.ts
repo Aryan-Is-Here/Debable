@@ -47,6 +47,8 @@ export interface DebateRoom {
   opponent: UserSummary;
   /** ISO-8601 timestamp the debate started. */
   startedAt: string;
+  /** ISO-8601 timestamp the debate ended, or null while it is still live. */
+  endedAt?: string | null;
 }
 
 /** Who authored a chat entry. `system` covers fact-check results and notices. */

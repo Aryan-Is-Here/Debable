@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from app.models.message import Message
     from app.models.rating import Rating
     from app.models.topic import Topic
+    from app.models.user import User
 
 
 class DebateRoom(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -49,6 +50,9 @@ class DebateRoom(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     topic: Mapped["Topic"] = relationship(back_populates="rooms")
+    # Two foreign keys to the same table, so each side must say which one it follows.
+    user1: Mapped["User"] = relationship(foreign_keys=[user1_id])
+    user2: Mapped["User"] = relationship(foreign_keys=[user2_id])
     messages: Mapped[list["Message"]] = relationship(
         back_populates="room", cascade="all, delete-orphan"
     )
