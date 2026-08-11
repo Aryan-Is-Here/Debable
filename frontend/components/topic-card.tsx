@@ -12,7 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 /** Maps a topic status to a Badge variant. */
@@ -70,14 +70,12 @@ export function TopicCard({ topic }: TopicCardProps) {
           {topic.activeDebaters} waiting
         </span>
         {topic.status !== "archived" && (
-          <Button
-            render={
-              <Link href={{ pathname: "/waiting", query: { topic: topic.id } }} />
-            }
+          <ButtonLink
+            href={{ pathname: "/waiting", query: { topic: topic.id } }}
             size="sm"
           >
             Debate
-          </Button>
+          </ButtonLink>
         )}
       </CardFooter>
     </Card>

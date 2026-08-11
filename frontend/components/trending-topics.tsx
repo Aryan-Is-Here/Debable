@@ -1,7 +1,6 @@
-import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button";
 import { TopicCard } from "@/components/topic-card";
 import { listTopics } from "@/services/topics";
 
@@ -32,15 +31,15 @@ export async function TrendingTopics() {
             The debates people are lining up for right now.
           </p>
         </div>
-        <Button
-          render={<Link href="/browse" />}
+        <ButtonLink
+          href="/browse"
           variant="ghost"
           size="sm"
           className="hidden sm:inline-flex"
         >
           View all
           <ArrowRight className="size-4" />
-        </Button>
+        </ButtonLink>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

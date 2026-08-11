@@ -1,7 +1,6 @@
-import Link from "next/link";
 import { ArrowRight, ScanSearch, Sparkles, Video } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button";
 import { TrendingTopics } from "@/components/trending-topics";
 
 /** How-it-works items shown beneath the hero. */
@@ -40,13 +39,13 @@ export default function HomePage() {
           then lets either of you fact-check any claim on demand, mid-conversation.
         </p>
         <div className="flex flex-col gap-3 sm:flex-row">
-          <Button render={<Link href="/browse" />} size="lg">
+          <ButtonLink href="/browse" size="lg">
             Browse topics
             <ArrowRight className="size-4" />
-          </Button>
-          <Button render={<Link href="/create" />} size="lg" variant="outline">
+          </ButtonLink>
+          <ButtonLink href="/create" size="lg" variant="outline">
             Create a topic
-          </Button>
+          </ButtonLink>
         </div>
       </section>
 

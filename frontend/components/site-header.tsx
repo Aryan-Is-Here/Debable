@@ -6,7 +6,7 @@ import { MessagesSquare, Settings, User } from "lucide-react";
 import { SignInButton, SignUpButton, UserButton, useAuth } from "@clerk/nextjs";
 
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 
 /** Primary navigation targets. Some routes arrive in later Phase 1 sub-steps. */
@@ -35,18 +35,19 @@ export function SiteHeader() {
                 ? pathname === "/"
                 : pathname.startsWith(item.href);
             return (
-              <Button
+              <ButtonLink
                 key={item.href}
-                render={<Link href={item.href} />}
+                href={item.href}
                 variant="ghost"
                 size="sm"
+                aria-current={isActive ? "page" : undefined}
                 className={cn(
                   "text-muted-foreground",
                   isActive && "text-foreground",
                 )}
               >
                 {item.label}
-              </Button>
+              </ButtonLink>
             );
           })}
         </nav>
