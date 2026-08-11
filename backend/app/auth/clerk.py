@@ -7,6 +7,7 @@ callers never poke at raw dictionaries.
 
 import logging
 from dataclasses import dataclass
+from datetime import timedelta
 from functools import lru_cache
 from typing import Any
 
@@ -19,6 +20,15 @@ from app.core.errors import AuthenticationError
 logger = logging.getLogger(__name__)
 
 _ALGORITHMS = ["RS256"]
+
+# Tolerance for clock difference between this server and Clerk's signing service.
+#
+# Clerk stamps tokens with `nbf`, so a server running even slightly behind sees freshly
+# minted tokens as not-yet-valid and rejects them — intermittently, which is worse than
+# failing outright. A development machine here measured 13 seconds behind; unsynchronised
+# clocks in the wild are routinely worse. Sixty seconds is the usual allowance and remains
+# far shorter than the token's own lifetime.
+_CLOCK_SKEW_LEEWAY = timedelta(seconds=60)
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +93,7 @@ class ClerkTokenVerifier:
                 algorithms=_ALGORITHMS,
                 issuer=self._settings.clerk_issuer,
                 audience=audience,
+                leeway=_CLOCK_SKEW_LEEWAY,
                 options={**options, "verify_aud": audience is not None},
             )
         except jwt.ExpiredSignatureError as exc:

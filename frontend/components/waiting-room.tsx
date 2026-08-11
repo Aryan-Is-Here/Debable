@@ -63,6 +63,17 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
     // must keep running until we are actually matched.
     refetchInterval: (query) =>
       query.state.data?.status === "matched" ? false : POLL_INTERVAL_MS,
+    // Critical for this screen: by default the interval fires but *skips the request*
+    // whenever document.visibilityState is "hidden". Matchmaking is inherently a
+    // two-window activity, so the waiting side is usually the hidden one — it would sit
+    // on the spinner forever while its opponent walked into the debate alone.
+    refetchIntervalInBackground: true,
+    // Also refetch the moment the user brings this window forward, rather than waiting out
+    // the interval. Overrides the app-wide default, which is off.
+    refetchOnWindowFocus: true,
+    // The join response seeds this cache entry, and the app-wide 30s staleTime would treat
+    // that as fresh enough to skip the first poll entirely.
+    staleTime: 0,
   });
 
   // Join once, as soon as Clerk knows who we are.
@@ -82,9 +93,19 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
 
   // Tick for the elapsed counter. setState lives in the interval callback, not the effect
   // body, so it doesn't trigger the cascading render the lint rule guards against.
+  //
+  // Browsers throttle timers in hidden windows to roughly once a minute, so the counter
+  // freezes while the window is in the background. Recomputing on visibilitychange means
+  // it shows the true elapsed time the instant the user looks at it again, rather than
+  // resuming from wherever it stalled.
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
+    const tick = () => setNow(Date.now());
+    const timer = setInterval(tick, 1000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, []);
 
   // Keep the newest getToken reachable from the unmount cleanup without making it a
