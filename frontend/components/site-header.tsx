@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { MessagesSquare } from "lucide-react";
+import { MessagesSquare, Settings, User } from "lucide-react";
+import { SignInButton, SignUpButton, UserButton, useAuth } from "@clerk/nextjs";
 
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button, ButtonLink } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { UserMenu } from "@/components/user-menu";
 
 /** Primary navigation targets. Some routes arrive in later Phase 1 sub-steps. */
 const navItems = [
@@ -18,6 +18,7 @@ const navItems = [
 
 export function SiteHeader() {
   const pathname = usePathname();
+  const { isLoaded, isSignedIn } = useAuth();
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -34,29 +35,56 @@ export function SiteHeader() {
                 ? pathname === "/"
                 : pathname.startsWith(item.href);
             return (
-              <Button
+              <ButtonLink
                 key={item.href}
-                render={<Link href={item.href} />}
+                href={item.href}
                 variant="ghost"
                 size="sm"
+                aria-current={isActive ? "page" : undefined}
                 className={cn(
                   "text-muted-foreground",
                   isActive && "text-foreground",
                 )}
               >
                 {item.label}
-              </Button>
+              </ButtonLink>
             );
           })}
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
           <ThemeToggle />
-          {/* Placeholder — real auth is wired to Clerk in Phase 2. */}
-          <Button variant="outline" size="sm" disabled title="Available after Phase 2 (Clerk)">
-            Sign in
-          </Button>
-          <UserMenu />
+          {/* Reserve the slot until Clerk has loaded, so the header doesn't jump. */}
+          {!isLoaded ? (
+            <div className="size-8" aria-hidden />
+          ) : isSignedIn ? (
+            <UserButton appearance={{ elements: { avatarBox: "size-8" } }}>
+              {/* Our own screens, kept reachable from Clerk's menu. */}
+              <UserButton.MenuItems>
+                <UserButton.Link
+                  href="/profile"
+                  label="Profile"
+                  labelIcon={<User className="size-4" />}
+                />
+                <UserButton.Link
+                  href="/settings"
+                  label="Settings"
+                  labelIcon={<Settings className="size-4" />}
+                />
+              </UserButton.MenuItems>
+            </UserButton>
+          ) : (
+            <>
+              <SignInButton mode="modal">
+                <Button variant="ghost" size="sm">
+                  Sign in
+                </Button>
+              </SignInButton>
+              <SignUpButton mode="modal">
+                <Button size="sm">Sign up</Button>
+              </SignUpButton>
+            </>
+          )}
         </div>
       </div>
     </header>

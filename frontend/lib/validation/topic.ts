@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { TOPIC_CATEGORIES } from "@/lib/constants/categories";
+
 /**
  * Validation schema for creating a debate topic.
  *
@@ -19,9 +21,11 @@ export const createTopicSchema = z.object({
     .trim()
     .min(20, "Description must be at least 20 characters.")
     .max(600, "Description must be at most 600 characters."),
-  category: z
-    .string()
-    .min(1, "Please choose a category."),
+  // Enumerated rather than a free string so the form rejects a bad value before the
+  // request is made. The backend enforces the same list — see lib/constants/categories.
+  category: z.enum(TOPIC_CATEGORIES, {
+    message: "Please choose a category.",
+  }),
 });
 
 export type CreateTopicInput = z.infer<typeof createTopicSchema>;

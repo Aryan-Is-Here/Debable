@@ -74,15 +74,6 @@ export const mockTopics: Topic[] = [
   },
 ];
 
-/** Topics surfaced on the Home screen — most active first, excluding archived. */
-export function getTrendingTopics(limit = 4): Topic[] {
-  return mockTopics
-    .filter((topic) => topic.status !== "archived")
-    .sort((a, b) => b.activeDebaters - a.activeDebaters)
-    .slice(0, limit);
-}
-
-/** Unique topic categories, alphabetically sorted, for the browse filter. */
-export function getCategories(): string[] {
-  return Array.from(new Set(mockTopics.map((topic) => topic.category))).sort();
-}
+// getTrendingTopics() and getCategories() lived here until Phase 3. Home and Browse now
+// read the real API; the fixtures below remain only because the debate and profile mocks
+// (Phases 4-8) still build on them.

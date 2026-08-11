@@ -9,6 +9,7 @@ from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.categories import CATEGORY_MAX_LENGTH
 from app.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
@@ -36,6 +37,9 @@ class Topic(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         index=True,
     )
+    # Deliberately a plain string with no CHECK constraint — the allowed values live in
+    # app.core.categories and are enforced by the API schema. See that module for why.
+    category: Mapped[str] = mapped_column(String(CATEGORY_MAX_LENGTH), nullable=False, index=True)
     status: Mapped[TopicStatus] = mapped_column(
         SAEnum(TopicStatus, name="topic_status", values_callable=lambda e: [m.value for m in e]),
         nullable=False,

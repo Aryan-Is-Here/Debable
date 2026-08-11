@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 
 import { CreateTopicForm } from "@/components/create-topic-form";
-import { getCategories } from "@/lib/mock/topics";
 
 export const metadata: Metadata = {
   title: "Create a topic",
@@ -9,8 +8,6 @@ export const metadata: Metadata = {
 };
 
 export default function CreatePage() {
-  const categories = getCategories();
-
   return (
     <div className="mx-auto w-full max-w-2xl px-4 py-12 sm:px-6">
       <header className="mb-8">
@@ -21,7 +18,7 @@ export default function CreatePage() {
         </p>
       </header>
 
-      <CreateTopicForm categories={categories} />
+      <CreateTopicForm />
     </div>
   );
 }
