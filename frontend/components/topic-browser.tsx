@@ -13,6 +13,8 @@ import { listTopics, topicKeys, type ListTopicsParams } from "@/services/topics"
 
 const PAGE_SIZE = 12;
 const SEARCH_DEBOUNCE_MS = 300;
+/** How often to refresh the live "N waiting" counts while Browse is open. */
+const WAITING_COUNT_REFRESH_MS = 10_000;
 
 /**
  * Interactive topic browser.
@@ -54,6 +56,13 @@ export function TopicBrowser() {
     queryFn: ({ signal }) => listTopics(params, { signal }),
     // Keeps the previous page visible while the next one loads, instead of flashing empty.
     placeholderData: keepPreviousData,
+    // Overrides the app-wide 30s staleTime: the "N waiting" badge changes as people join
+    // and leave queues, and the moment you most want it current is when you switch back to
+    // this window — which is exactly when the shared defaults would have served a cached
+    // count instead.
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: WAITING_COUNT_REFRESH_MS,
   });
 
   const categories = [ALL_CATEGORIES, ...TOPIC_CATEGORIES];

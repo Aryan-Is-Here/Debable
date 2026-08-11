@@ -2,14 +2,24 @@
 
 import uuid
 from collections.abc import Sequence
+from datetime import timedelta
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.debate_room import DebateRoom
 from app.models.match_queue import MatchQueueEntry
 from app.models.topic import Topic
+
+# How long a queue entry stays valid without a heartbeat. The waiting room polls every two
+# seconds, so this is generous — it only has to outlast a slow network, not a closed tab.
+QUEUE_STALE_AFTER = timedelta(seconds=30)
+
+
+def _fresh_cutoff():
+    """SQL expression for the oldest heartbeat still considered live."""
+    return func.now() - QUEUE_STALE_AFTER
 
 
 async def get_queue_entry(db: AsyncSession, user_id: uuid.UUID) -> MatchQueueEntry | None:
@@ -33,11 +43,38 @@ async def claim_waiting_opponent(
     """
     return await db.scalar(
         select(MatchQueueEntry)
-        .where(MatchQueueEntry.topic_id == topic_id, MatchQueueEntry.user_id != user_id)
+        .where(
+            MatchQueueEntry.topic_id == topic_id,
+            MatchQueueEntry.user_id != user_id,
+            # Never pair someone with a tab that stopped polling.
+            MatchQueueEntry.last_seen_at >= _fresh_cutoff(),
+        )
         .order_by(MatchQueueEntry.created_at.asc())
         .limit(1)
         .with_for_update(skip_locked=True)
     )
+
+
+async def touch(db: AsyncSession, user_id: uuid.UUID) -> None:
+    """Record that the caller is still waiting."""
+    await db.execute(
+        update(MatchQueueEntry)
+        .where(MatchQueueEntry.user_id == user_id)
+        .values(last_seen_at=func.now())
+    )
+
+
+async def sweep_stale(db: AsyncSession) -> int:
+    """Delete entries that stopped heartbeating. Returns how many were removed.
+
+    Called opportunistically from the matchmaking endpoints rather than from a background
+    job: the queue is only interesting while someone is using it, and a cron for a handful
+    of rows is machinery this does not need.
+    """
+    result = await db.execute(
+        delete(MatchQueueEntry).where(MatchQueueEntry.last_seen_at < _fresh_cutoff())
+    )
+    return result.rowcount or 0
 
 
 async def enqueue(db: AsyncSession, *, user_id: uuid.UUID, topic_id: uuid.UUID) -> MatchQueueEntry:
@@ -65,7 +102,11 @@ async def waiting_counts(db: AsyncSession, topic_ids: Sequence[uuid.UUID]) -> di
         return {}
     rows = await db.execute(
         select(MatchQueueEntry.topic_id, func.count())
-        .where(MatchQueueEntry.topic_id.in_(topic_ids))
+        .where(
+            MatchQueueEntry.topic_id.in_(topic_ids),
+            # Only count people actually still there.
+            MatchQueueEntry.last_seen_at >= _fresh_cutoff(),
+        )
         .group_by(MatchQueueEntry.topic_id)
     )
     return {topic_id: count for topic_id, count in rows.all()}

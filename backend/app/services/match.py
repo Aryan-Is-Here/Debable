@@ -53,10 +53,19 @@ def to_room_read(room: DebateRoom, viewer_id: uuid.UUID) -> DebateRoomRead:
 
 
 async def get_state(db: AsyncSession, user: User) -> MatchState:
-    """What the caller is currently doing: idle, queued, or matched."""
+    """What the caller is currently doing: idle, queued, or matched.
+
+    Polling this is also the caller's heartbeat — it is what keeps their queue entry alive.
+    """
     room = await match_repo.get_active_room_for_user(db, user.id)
     if room is not None:
         return MatchState(status=MatchStatus.MATCHED, room=to_room_read(room, user.id))
+
+    # Refresh our own entry and drop anyone who stopped polling, so the count below and any
+    # concurrent pairing both see only people who are really here.
+    await match_repo.touch(db, user.id)
+    await match_repo.sweep_stale(db)
+    await db.commit()
 
     entry = await match_repo.get_queue_entry(db, user.id)
     if entry is None:
@@ -83,6 +92,10 @@ async def join(db: AsyncSession, user: User, topic_id: uuid.UUID) -> MatchState:
     existing_room = await match_repo.get_active_room_for_user(db, user.id)
     if existing_room is not None:
         return MatchState(status=MatchStatus.MATCHED, room=to_room_read(existing_room, user.id))
+
+    # Clear out abandoned entries before looking for an opponent, so we never pair against
+    # a tab that was closed minutes ago.
+    await match_repo.sweep_stale(db)
 
     opponent_entry = await match_repo.claim_waiting_opponent(db, topic_id=topic_id, user_id=user.id)
 

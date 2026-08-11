@@ -10,9 +10,10 @@ topic in separate queues, never to meet. See blueprint conflict #2.
 """
 
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Index
+from sqlalchemy import DateTime, ForeignKey, Index, func
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -43,6 +44,19 @@ class MatchQueueEntry(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         PgUUID(as_uuid=True),
         ForeignKey("topics.id", ondelete="CASCADE"),
         nullable=False,
+    )
+
+    # Liveness heartbeat, refreshed by every status poll from the waiting room.
+    #
+    # A browser that closes gets no chance to withdraw: unload handlers are unreliable and
+    # the request needs an auth token it has no time to fetch. So presence is proven by
+    # continuing to poll rather than by promising to clean up. Entries that stop being
+    # refreshed are ignored for matching and swept away — no ghost opponents.
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
     )
 
     user: Mapped["User"] = relationship()

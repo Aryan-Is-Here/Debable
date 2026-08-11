@@ -16,6 +16,9 @@ import { getMatchState, joinQueue, leaveQueue, matchKeys } from "@/services/matc
 /** How often to ask the server whether an opponent has turned up. */
 const POLL_INTERVAL_MS = 2000;
 
+/** How many times to re-join if we find ourselves unexpectedly out of the queue. */
+const MAX_REJOIN_ATTEMPTS = 3;
+
 interface WaitingRoomProps {
   /** Topic to queue for, from the `?topic=` query parameter. */
   topicId: string;
@@ -38,6 +41,7 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
   const joinRequested = useRef(false);
   // Whether leaving this page should withdraw us from the queue.
   const shouldDequeue = useRef(false);
+  const rejoinAttempts = useRef(0);
 
   const {
     mutate: requestJoin,
@@ -54,10 +58,11 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
   const { data: state, isError, error } = useQuery({
     queryKey: matchKeys.state,
     queryFn: async ({ signal }) => getMatchState(await getToken(), signal),
-    // Only poll once we are actually in the queue.
     enabled: hasJoined,
+    // Each poll is also the server-side heartbeat that keeps our queue entry alive, so it
+    // must keep running until we are actually matched.
     refetchInterval: (query) =>
-      query.state.data?.status === "queued" ? POLL_INTERVAL_MS : false,
+      query.state.data?.status === "matched" ? false : POLL_INTERVAL_MS,
   });
 
   // Join once, as soon as Clerk knows who we are.
@@ -67,6 +72,14 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
     requestJoin();
   }, [isLoaded, isSignedIn, requestJoin]);
 
+  // Recover if we somehow lost our place in the queue while still sitting here. Bounded,
+  // so a persistent server-side refusal surfaces as a stuck spinner rather than a loop.
+  useEffect(() => {
+    if (state?.status !== "idle" || rejoinAttempts.current >= MAX_REJOIN_ATTEMPTS) return;
+    rejoinAttempts.current += 1;
+    requestJoin();
+  }, [state?.status, requestJoin]);
+
   // Tick for the elapsed counter. setState lives in the interval callback, not the effect
   // body, so it doesn't trigger the cascading render the lint rule guards against.
   useEffect(() => {
@@ -74,15 +87,25 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
     return () => clearInterval(timer);
   }, []);
 
-  // Withdraw if the user navigates away while still queued — otherwise they linger as a
-  // phantom opponent someone else would be matched with.
+  // Keep the newest getToken reachable from the unmount cleanup without making it a
+  // dependency of that effect. Clerk memoises getToken on its context object, so its
+  // identity changes as the session settles — depending on it made React run the cleanup
+  // mid-session and silently withdraw the user from the queue they were watching.
+  const getTokenRef = useRef(getToken);
+  useEffect(() => {
+    getTokenRef.current = getToken;
+  });
+
+  // Withdraw on leaving the page. Empty deps: this must fire on unmount and nothing else.
+  // A closed tab cannot be relied on to reach here at all — that case is covered server
+  // side by the heartbeat, which expires entries that stop polling.
   useEffect(() => {
     return () => {
       if (shouldDequeue.current) {
-        void getToken().then((token) => leaveQueue(token).catch(() => undefined));
+        void getTokenRef.current().then((token) => leaveQueue(token).catch(() => undefined));
       }
     };
-  }, [getToken]);
+  }, []);
 
   async function cancel() {
     shouldDequeue.current = false;
