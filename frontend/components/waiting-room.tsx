@@ -55,7 +55,14 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
     },
   });
 
-  const { data: state, isError, error } = useQuery({
+  const {
+    data: state,
+    isError,
+    error,
+    dataUpdatedAt,
+    errorUpdatedAt,
+    fetchStatus,
+  } = useQuery({
     queryKey: matchKeys.state,
     queryFn: async ({ signal }) => getMatchState(await getToken(), signal),
     enabled: hasJoined,
@@ -199,6 +206,13 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
           <Button variant="ghost" onClick={cancel}>
             Cancel
           </Button>
+          <PollDiagnostics
+            status={state?.status}
+            fetchStatus={fetchStatus}
+            dataUpdatedAt={dataUpdatedAt}
+            errorUpdatedAt={errorUpdatedAt}
+            now={now}
+          />
         </>
       ) : (
         <>
@@ -232,6 +246,42 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * Development-only readout of the polling loop.
+ *
+ * Matchmaking bugs are invisible from the outside — a spinner looks identical whether the
+ * client is polling happily, silently failing, or not polling at all. Showing when the last
+ * poll landed turns "it just sits there" into a diagnosable report. Hidden in production.
+ */
+function PollDiagnostics({
+  status,
+  fetchStatus,
+  dataUpdatedAt,
+  errorUpdatedAt,
+  now,
+}: {
+  status?: string;
+  fetchStatus: string;
+  dataUpdatedAt: number;
+  errorUpdatedAt: number;
+  now: number;
+}) {
+  if (process.env.NODE_ENV === "production") return null;
+
+  const last = Math.max(dataUpdatedAt, errorUpdatedAt);
+  const ago = last ? `${Math.round((now - last) / 1000)}s ago` : "never";
+  const stalled = last === 0 || now - last > 15_000;
+
+  return (
+    <p
+      className={`font-mono text-xs ${stalled ? "text-destructive" : "text-muted-foreground/60"}`}
+    >
+      dev · status={status ?? "—"} · fetch={fetchStatus} · last poll {ago}
+      {stalled && " · POLLING STALLED"}
+    </p>
   );
 }
 

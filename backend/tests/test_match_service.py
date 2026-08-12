@@ -112,18 +112,37 @@ async def test_switching_topics_replaces_the_queue_entry(
     assert entry.topic_id == another.id
 
 
-async def test_joining_while_already_in_a_room_returns_that_room(
+async def test_searching_again_abandons_the_previous_room(
+    db_session: AsyncSession, user: User, other_user: User, topic: Topic
+) -> None:
+    """Regression: an open room used to be handed back forever.
+
+    A debate closed by shutting the tab never ends, so both participants stayed "already
+    debating" and every later attempt returned the same dead room.
+    """
+    await match_service.join(db_session, user, topic.id)
+    matched = await match_service.join(db_session, other_user, topic.id)
+    assert matched.room is not None
+
+    again = await match_service.join(db_session, other_user, topic.id)
+
+    assert again.status is MatchStatus.QUEUED, "was handed back the abandoned room"
+    assert again.room is None
+    # The other participant is released as well, rather than left stuck in a dead debate.
+    assert (await match_service.get_state(db_session, user)).status is MatchStatus.IDLE
+
+
+async def test_the_abandoned_room_is_actually_closed(
     db_session: AsyncSession, user: User, other_user: User, topic: Topic
 ) -> None:
     await match_service.join(db_session, user, topic.id)
     matched = await match_service.join(db_session, other_user, topic.id)
-
-    again = await match_service.join(db_session, other_user, topic.id)
-
-    assert again.status is MatchStatus.MATCHED
-    assert again.room is not None
     assert matched.room is not None
-    assert again.room.id == matched.room.id
+
+    await match_service.join(db_session, other_user, topic.id)
+
+    room = await match_repo.get_room(db_session, matched.room.id)
+    assert room is not None and room.ended_at is not None
 
 
 async def test_leaving_the_queue_returns_the_user_to_idle(

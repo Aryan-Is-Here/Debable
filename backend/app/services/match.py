@@ -88,10 +88,20 @@ async def join(db: AsyncSession, user: User, topic_id: uuid.UUID) -> MatchState:
     if topic.status == TopicStatus.ARCHIVED:
         raise ConflictError("This topic is archived and no longer accepts debates.")
 
-    # Already debating? Send them back to that room rather than opening a second one.
+    # Clicking "Debate" on a topic is an unambiguous request for a *new* debate, so any room
+    # still hanging open is abandoned rather than returned.
+    #
+    # Returning it instead — the previous behaviour — turned every debate closed by shutting
+    # the tab into a permanent trap: the room never ends, so both participants are forever
+    # "already debating" and every future attempt hands them back the same dead room with an
+    # opponent who left long ago. Ending it here frees the other side too.
     existing_room = await match_repo.get_active_room_for_user(db, user.id)
     if existing_room is not None:
-        return MatchState(status=MatchStatus.MATCHED, room=to_room_read(existing_room, user.id))
+        await match_repo.end_room(db, existing_room)
+        logger.info(
+            "Abandoned a room to start a new search",
+            extra={"room_id": str(existing_room.id), "user_id": str(user.id)},
+        )
 
     # Clear out abandoned entries before looking for an opponent, so we never pair against
     # a tab that was closed minutes ago.
