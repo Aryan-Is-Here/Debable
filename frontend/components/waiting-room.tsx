@@ -62,26 +62,37 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
     dataUpdatedAt,
     errorUpdatedAt,
     fetchStatus,
+    refetch,
   } = useQuery({
     queryKey: matchKeys.state,
     queryFn: async ({ signal }) => getMatchState(await getToken(), signal),
     enabled: hasJoined,
-    // Each poll is also the server-side heartbeat that keeps our queue entry alive, so it
-    // must keep running until we are actually matched.
-    refetchInterval: (query) =>
-      query.state.data?.status === "matched" ? false : POLL_INTERVAL_MS,
-    // Critical for this screen: by default the interval fires but *skips the request*
-    // whenever document.visibilityState is "hidden". Matchmaking is inherently a
-    // two-window activity, so the waiting side is usually the hidden one — it would sit
-    // on the spinner forever while its opponent walked into the debate alone.
-    refetchIntervalInBackground: true,
-    // Also refetch the moment the user brings this window forward, rather than waiting out
-    // the interval. Overrides the app-wide default, which is off.
+    // Deliberately no refetchInterval. The declarative interval never fired on this screen
+    // and three isolated reproductions failed to explain why — its behaviour depends on the
+    // interaction of `enabled`, staleTime, window focus and a cache seeded before the query
+    // was enabled. This loop is the one thing on the screen that must not silently stop
+    // working, so it is driven explicitly below where the behaviour is plain to read.
     refetchOnWindowFocus: true,
-    // The join response seeds this cache entry, and the app-wide 30s staleTime would treat
-    // that as fresh enough to skip the first poll entirely.
     staleTime: 0,
   });
+
+  const matched = state?.status === "matched" ? state.room : null;
+
+  // The poll loop. Also the server-side heartbeat that keeps our queue entry alive, so it
+  // runs until we are actually matched. refetch() always hits the network, regardless of
+  // staleness.
+  useEffect(() => {
+    if (!hasJoined || matched) return;
+    const poll = () => void refetch();
+    const timer = setInterval(poll, POLL_INTERVAL_MS);
+    // Browsers throttle timers in hidden windows to roughly once a minute, and matchmaking
+    // is inherently a two-window activity — so also poll the moment this one is looked at.
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", poll);
+    };
+  }, [hasJoined, matched, refetch]);
 
   // Join once, as soon as Clerk knows who we are.
   useEffect(() => {
@@ -173,7 +184,6 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
   }
 
   const topic = state?.topic ?? state?.room?.topic;
-  const matched = state?.status === "matched" ? state.room : null;
   const elapsed = state?.queuedAt
     ? Math.max(0, Math.floor((now - new Date(state.queuedAt).getTime()) / 1000))
     : 0;
@@ -207,6 +217,7 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
             Cancel
           </Button>
           <PollDiagnostics
+            joined={hasJoined}
             status={state?.status}
             fetchStatus={fetchStatus}
             dataUpdatedAt={dataUpdatedAt}
@@ -257,12 +268,14 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
  * poll landed turns "it just sits there" into a diagnosable report. Hidden in production.
  */
 function PollDiagnostics({
+  joined,
   status,
   fetchStatus,
   dataUpdatedAt,
   errorUpdatedAt,
   now,
 }: {
+  joined: boolean;
   status?: string;
   fetchStatus: string;
   dataUpdatedAt: number;
@@ -279,7 +292,8 @@ function PollDiagnostics({
     <p
       className={`font-mono text-xs ${stalled ? "text-destructive" : "text-muted-foreground/60"}`}
     >
-      dev · status={status ?? "—"} · fetch={fetchStatus} · last poll {ago}
+      dev · joined={String(joined)} · status={status ?? "—"} · fetch={fetchStatus} · last poll{" "}
+      {ago}
       {stalled && " · POLLING STALLED"}
     </p>
   );
