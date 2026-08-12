@@ -43,12 +43,18 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
   const shouldDequeue = useRef(false);
   const rejoinAttempts = useRef(0);
 
+  const signedIn = isLoaded && isSignedIn === true;
+
   const {
     mutate: requestJoin,
-    isSuccess: hasJoined,
+    status: joinStatus,
     error: joinError,
   } = useMutation({
     mutationFn: async () => joinQueue(topicId, await getToken()),
+    // A join that fails leaves the user staring at a spinner they can never escape, so it
+    // is worth retrying rather than surrendering on a single blip.
+    retry: 2,
+    retryDelay: 1000,
     onSuccess: (state) => {
       shouldDequeue.current = state.status === "queued";
       queryClient.setQueryData(matchKeys.state, state);
@@ -66,12 +72,17 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
   } = useQuery({
     queryKey: matchKeys.state,
     queryFn: async ({ signal }) => getMatchState(await getToken(), signal),
-    enabled: hasJoined,
-    // Deliberately no refetchInterval. The declarative interval never fired on this screen
-    // and three isolated reproductions failed to explain why — its behaviour depends on the
-    // interaction of `enabled`, staleTime, window focus and a cache seeded before the query
-    // was enabled. This loop is the one thing on the screen that must not silently stop
-    // working, so it is driven explicitly below where the behaviour is plain to read.
+    // Gated only on being signed in — deliberately *not* on the join having succeeded.
+    //
+    // Coupling the two is what stalled this screen: when the join mutation did not reach a
+    // success state, the query stayed disabled and nothing ever polled, while cached data
+    // from an earlier attempt kept the UI looking alive. GET /match is safe to call at any
+    // time — it simply reports idle, queued or matched — so the poll is now the source of
+    // truth and the join is just an action that kicks it off.
+    enabled: signedIn,
+    // Deliberately no refetchInterval either. The declarative interval never fired here and
+    // three isolated reproductions failed to explain why, so the loop below owns the timing
+    // where the behaviour is plain to read.
     refetchOnWindowFocus: true,
     staleTime: 0,
   });
@@ -82,7 +93,7 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
   // runs until we are actually matched. refetch() always hits the network, regardless of
   // staleness.
   useEffect(() => {
-    if (!hasJoined || matched) return;
+    if (!signedIn || matched) return;
     const poll = () => void refetch();
     const timer = setInterval(poll, POLL_INTERVAL_MS);
     // Browsers throttle timers in hidden windows to roughly once a minute, and matchmaking
@@ -92,22 +103,24 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", poll);
     };
-  }, [hasJoined, matched, refetch]);
+  }, [signedIn, matched, refetch]);
 
   // Join once, as soon as Clerk knows who we are.
   useEffect(() => {
-    if (!isLoaded || !isSignedIn || joinRequested.current) return;
+    if (!signedIn || joinRequested.current) return;
     joinRequested.current = true;
     requestJoin();
-  }, [isLoaded, isSignedIn, requestJoin]);
+  }, [signedIn, requestJoin]);
 
-  // Recover if we somehow lost our place in the queue while still sitting here. Bounded,
-  // so a persistent server-side refusal surfaces as a stuck spinner rather than a loop.
+  // Recover if the server says we are not queued while we are sitting here waiting — either
+  // the join never landed or we were swept. Bounded, so a persistent refusal surfaces as a
+  // stalled screen rather than an endless retry loop.
   useEffect(() => {
-    if (state?.status !== "idle" || rejoinAttempts.current >= MAX_REJOIN_ATTEMPTS) return;
+    if (state?.status !== "idle" || joinStatus === "pending") return;
+    if (rejoinAttempts.current >= MAX_REJOIN_ATTEMPTS) return;
     rejoinAttempts.current += 1;
     requestJoin();
-  }, [state?.status, requestJoin]);
+  }, [state?.status, joinStatus, requestJoin]);
 
   // Tick for the elapsed counter. setState lives in the interval callback, not the effect
   // body, so it doesn't trigger the cascading render the lint rule guards against.
@@ -217,7 +230,7 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
             Cancel
           </Button>
           <PollDiagnostics
-            joined={hasJoined}
+            joinStatus={joinStatus}
             status={state?.status}
             fetchStatus={fetchStatus}
             dataUpdatedAt={dataUpdatedAt}
@@ -268,14 +281,14 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
  * poll landed turns "it just sits there" into a diagnosable report. Hidden in production.
  */
 function PollDiagnostics({
-  joined,
+  joinStatus,
   status,
   fetchStatus,
   dataUpdatedAt,
   errorUpdatedAt,
   now,
 }: {
-  joined: boolean;
+  joinStatus: string;
   status?: string;
   fetchStatus: string;
   dataUpdatedAt: number;
@@ -292,8 +305,7 @@ function PollDiagnostics({
     <p
       className={`font-mono text-xs ${stalled ? "text-destructive" : "text-muted-foreground/60"}`}
     >
-      dev · joined={String(joined)} · status={status ?? "—"} · fetch={fetchStatus} · last poll{" "}
-      {ago}
+      dev · join={joinStatus} · status={status ?? "—"} · fetch={fetchStatus} · last poll {ago}
       {stalled && " · POLLING STALLED"}
     </p>
   );
