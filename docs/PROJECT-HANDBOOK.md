@@ -1,6 +1,6 @@
 # Debable — Complete Project Handbook
 
-**Generated:** 2026-07-18 · **Last updated:** 2026-08-10 · **Project state:** Phases 1–2 complete, Phase 3 next
+**Generated:** 2026-07-18 · **Last updated:** 2026-08-12 · **Project state:** Phases 1–4 complete, Phase 5 next
 **Repository:** https://github.com/Aryan-Is-Here/Debable
 **Local path:** `E:\Projects\Debable`
 
@@ -37,7 +37,7 @@ The blueprint in `docs/` (13 documents: PRD, architecture, database, API spec, U
 | Server state | TanStack Query | ⏳ Planned (when real API exists) |
 | Client state | Zustand | ⏳ Planned (only if needed) |
 | Backend | FastAPI, SQLAlchemy 2 (async), Alembic, PostgreSQL 16, uv | ✅ In use |
-| Video | LiveKit | ⏳ Phase 5 |
+| Video | LiveKit Cloud | 🔵 Phase 5 (needs project credentials) |
 | Auth | **Clerk** (backend verifies Clerk JWTs; no login endpoint) | ✅ Backend side done |
 | AI | RAG + LLM (default: Anthropic Claude), isolated service | ⏳ Phase 7 |
 | Local dev | Docker Compose (postgres:16 + api) | ✅ In use |
@@ -86,7 +86,7 @@ E:\Projects\Debable          (git repo, remote: Aryan-Is-Here/Debable)
 
 ---
 
-## 4. Everything built so far (Phases 0–2)
+## 4. Everything built so far (Phases 0–4)
 
 ### Phase 0 — Planning ✅
 Repo scaffolded to the blueprint structure; blueprint extracted into `docs/`; git + GitHub wired; root `.gitignore` (Node+Python+env) and README. Opinionated configs (linters, CI, Docker) deliberately deferred to their phases.
@@ -167,7 +167,10 @@ inside the built `api` image.
 11. **⚠️ Windows + psycopg:** the async driver cannot run on Python's default `ProactorEventLoop`. Start the API with `uv run python -m app` (not bare `uvicorn`) — `app/core/platform.py` selects the selector policy before the loop is created, and `migrations/env.py` does the same. Linux/macOS/Docker are unaffected.
 12. **Config lists from env:** pydantic-settings JSON-decodes `list[str]` fields before validators run. Any new comma-separated setting must use the `CsvList` alias in `app/core/config.py`, otherwise `A,B` in `.env` raises a parse error at startup.
 13. **Errors:** raise `AppError` subclasses from services/repositories rather than `HTTPException`, so those layers stay framework-free and every response keeps the same envelope.
-14. **Migrations are hand-checkable:** after editing models, autogenerate or hand-write the revision, then prove equivalence with `alembic check`. Constraint names come from the naming convention in `app/db/base.py` — name new `CheckConstraint`s with the short form (`score_range`), not the full `ck_…` string, or the convention will double the prefix.
+14. **Presence is proven by polling, never promised on exit.** A closed tab cannot reliably withdraw itself — unload handlers are unreliable and the request needs a token there is no time to fetch. `match_queue.last_seen_at` is refreshed by every status poll; entries that stop being refreshed are excluded from matching and swept. Apply the same shape to any future "who is here" state.
+15. **Never gate a poll on a mutation.** The waiting room's poll was `enabled` only once the join mutation succeeded; when the mutation didn't resolve, nothing polled while cached data kept the screen looking alive. Read endpoints are safe to call at any time — let the poll be the source of truth and the mutation merely an action. The waiting room also owns its interval explicitly rather than using `refetchInterval`, whose behaviour depends on the interaction of `enabled`, `staleTime` and window focus.
+16. **The waiting room carries a dev-only diagnostic line** (`dev · join=… · status=… · fetch=… · last poll …`), hidden in production. It exists because a spinner looks identical whether the client is polling, failing silently, or not polling at all — three rounds of debugging were spent on that ambiguity. Keep it.
+17. **Migrations are hand-checkable:** after editing models, autogenerate or hand-write the revision, then prove equivalence with `alembic check`. Constraint names come from the naming convention in `app/db/base.py` — name new `CheckConstraint`s with the short form (`score_range`), not the full `ck_…` string, or the convention will double the prefix.
 
 ### How to run the frontend
 ```bash
@@ -209,66 +212,88 @@ Whole stack in containers instead: `docker compose -f docker/docker-compose.yml 
 |---|---|---|---|
 | 4 | Schema gaps: no timestamps on Users/Topics; no `created_at` on Ratings; `FactChecks.sources` untyped | Phase 2 | `created_at`/`updated_at` on **every** table via `TimestampMixin`; `sources` is **JSONB** defaulting to `[]`. Also added `fact_checks.explanation` (the UI needs it) and `users.clerk_user_id`. |
 | 5 | Local Postgres — Docker wasn't installed | Phase 2 | **Docker Desktop installed** (on `E:`). `docker/docker-compose.yml` runs `postgres:16-alpine` with a healthcheck, plus an optional `api` service. |
+| 2 | `POST /match` mechanics undefined | Phase 4 | **A `match_queue` table in Postgres**, paired inside one transaction with `SELECT … FOR UPDATE SKIP LOCKED`, delivered by the waiting room **polling** every 2s. In-memory was rejected because a deployed backend runs several workers, so per-process queues would leave two people waiting on the same topic in separate queues. Polling rather than WebSocket because the WS layer does not exist until Phase 6. |
+| 7 | `Topic.activeDebaters` was a computed count with nothing behind it | Phase 4 | Now the live count of queue rows per topic, resolved with one grouped query per page. Stale entries are excluded. |
 
 ### Open — resolve at the stated phase, never silently
 | # | Conflict / gap | Phase | Working proposal |
 |---|---|---|---|
 | 1 | Reports feature (PRD + `POST /report`) has **no DB table** in doc 04 | 9 | Add `Reports` table (id, room_id, reporter_id, reported_user_id, reason, created_at) |
-| 2 | `POST /match` mechanics undefined | 4 | Decide queue model (in-DB queue vs in-memory), delivery (poll vs WS) |
 | 3 | Chat transport: doc 05 REST vs `websocket/` dir | 6 | WS for delivery, persist via Messages table |
 | 6 | **`Topic.category` exists only in the frontend.** `lib/types.ts` marks it UI-only and Browse filters on it, but doc 04 has no such column. Worse, `getCategories()` derives the list from *existing topics*, so against an empty database the Create form's select is empty and no topic can ever be created. | 3 | **Decided (2026-08-10):** indexed `varchar` column plus a single shared allowlist constant validated by both the zod schema and the backend. No Postgres enum and no `CHECK` constraint — the frontend select must know the list anyway, so a migration would add cost without adding protection. Values: Technology, Science, Politics, Economics, Society, Ethics, Health, Environment, Education, Culture (`Work` folds into Economics; remap the mock topic using it). |
-| 7 | **`Topic.activeDebaters` is a computed count**, not a stored column. | 3/4 | Derive it (count of waiting users per topic) once matchmaking exists; until then Browse shows a placeholder. Do not add a denormalised column without a reason. |
 | 8 | Clerk configuration | 3 | **Resolved (2026-08-10).** Development instance `distinct-kitten-15.clerk.accounts.dev`; `CLERK_ISSUER` set in `backend/.env`, JWKS verified live through `ClerkTokenVerifier` (one RS256 key). Remaining Phase 3 work: add the publishable key to the frontend, mount `<ClerkProvider>`, replace the disabled "Sign in" button, and confirm a real session token verifies end to end. The session token must carry `email`, `username` and `image_url` claims (configured in the Clerk dashboard) — `get_current_user` reads exactly those. |
 
 ---
 
-## 7. How to continue — Phase 3 in extreme detail
+### Phase 4 — Matchmaking ✅ (branch `feature/matchmaking`)
 
-**Goal:** Topics. The first real feature slice, end to end: create and list topics through the
-API, and replace the frontend's topic mocks with live data. This is also the phase where the
-frontend stops being self-contained, so the seams matter more than the endpoints do.
+Two people who pick the same topic are paired into a real, persisted debate room.
 
-**Branch:** `feature/topics`
+| Area | What exists |
+|---|---|
+| Queue | `match_queue`, one row per waiting user, deleted the instant a pair forms |
+| Pairing | `SELECT … FOR UPDATE SKIP LOCKED` — two simultaneous joins cannot claim the same opponent. Tested with genuinely concurrent connections, since row locking is invisible inside one transaction |
+| Liveness | `last_seen_at` heartbeat refreshed by every poll; stale entries are excluded and swept |
+| Endpoints | `POST`/`GET`/`DELETE /api/v1/match`, `GET /api/v1/rooms/{id}`, `POST /api/v1/rooms/{id}/end` |
+| Rooms | `you`/`opponent` resolved per caller; non-participants get 403; ending is idempotent and frees both sides |
+| Frontend | Waiting room joins, polls every 2s, shows elapsed time and how many others wait, withdraws on cancel or navigate-away; debate room loads the real room by id |
 
-### Decide before writing code
-1. **Conflict #6 — `category`.** Browse filters by it and Create requires it, but no column
-   exists. Pick a fixed set (enum, migration needed whenever it changes) or free text with a
-   curated list in the UI. Whatever you pick, the zod schema in
-   `frontend/lib/validation/topic.ts` and the backend validator must agree exactly.
-2. **Conflict #8 — Clerk.** `POST /topics` needs an authenticated creator, so the Clerk app has
-   to exist first: create it, set `CLERK_ISSUER` in `backend/.env`, add the publishable key to
-   the frontend, and verify one real token against `get_current_claims` before building on it.
-3. **Conflict #7 — `activeDebaters`.** Leave it out of the API for now, or return `0`. It is a
-   matchmaking-queue count and there is no queue until Phase 4.
+**Bugs this phase cost three rounds to find — all worth remembering:**
+
+1. The withdraw-on-leave effect depended on Clerk's `getToken`, whose identity changes as the session settles. React runs an effect's cleanup when dependencies change, not only on unmount, so the page withdrew itself from the queue while the user watched.
+2. Rooms only end via the End debate button, so closing the tab left one open — and joining used to *return* an open room, trapping both participants forever with a partner who had left. Joining now ends it.
+3. The poll was gated on the join mutation succeeding (see §5.15).
+4. The machine's clock ran 13s behind Clerk's; Clerk stamps `nbf`, so freshly minted tokens were intermittently rejected. Verification now allows 60s of skew.
+
+---
+
+## 7. How to continue — Phase 5 in extreme detail
+
+**Goal:** Video. Replace the mock `VideoTile` placeholders with real one-to-one WebRTC through
+LiveKit, so two matched debaters can actually see and hear each other.
+
+**Branch:** `feature/video`
+
+### Needed before live verification
+LiveKit Cloud credentials. Create a free project at cloud.livekit.io, then from its Settings →
+Keys take three values into `backend/.env`: `LIVEKIT_URL` (the `wss://…` project URL),
+`LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`. The secret is a signing key — treat it exactly
+like the Clerk secret: it belongs in `.env` and nowhere else, never in the frontend, never in
+a commit, never pasted into chat. The frontend needs only the `wss://` URL, which is public.
+
+Most of the phase can be built before the credentials exist; only the live call needs them.
 
 ### Step-by-step
-4. **Migration** for the `category` decision (plus any index Browse's filter needs).
-5. **Repository** (`app/repositories/topic.py`): query/persist functions taking an
-   `AsyncSession`. No FastAPI imports here.
-6. **Service** (`app/services/topic.py`): business rules — ownership, validation beyond field
-   shape, raising `AppError` subclasses.
-7. **Schemas** (`app/schemas/topic.py`): `TopicCreate`, `TopicRead`, `UserSummary`. Match
-   `frontend/lib/types.ts` field-for-field; that file *is* the contract.
-8. **Endpoints** (`app/api/v1/topics.py`): `POST /api/v1/topics` (auth required, creator from
-   `get_current_user`) and `GET /api/v1/topics` (public; search + category filter + pagination
-   server-side, since Browse currently filters client-side over mocks).
-9. **Tests:** repository/service tests against a real Postgres (a throwaway compose database or
-   a per-test transaction), plus endpoint tests with the auth dependency overridden.
-10. **Frontend wiring:** add TanStack Query + a `services/topics.ts` client returning existing
-    `lib/types.ts` shapes; swap `lib/mock/topics.ts` call-sites in Browse/Create/Home. Screens
-    should not need rewrites — if one does, the API shape drifted from the view-model.
-11. **Verify both sides:** backend loop from §5.10; frontend `npm run lint` + `npm run build`;
-    then click Browse → Create → Browse and confirm the new topic is really persisted.
-12. **Commit → push → merge** when green.
+1. **Settings** (`app/core/config.py`): the three LiveKit values, all defaulting to empty, plus
+   a `.env.example` entry. Token minting must fail closed with a clear error when unconfigured,
+   the way Clerk verification does.
+2. **Token service** (`app/services/video.py`): mint a short-lived LiveKit access token scoped
+   to one room and one identity. **The room name must be the debate room's id**, and the grant
+   must be issued only to that room's two participants — reuse the participant check in
+   `app/services/match.py`, which already raises `PermissionDeniedError` for outsiders.
+3. **Endpoint** (`app/api/v1/match.py` or a new `video.py`): `POST /api/v1/rooms/{id}/token`
+   returning `{url, token}`. Auth required; 403 for non-participants; 409 once the room has
+   ended, since a finished debate should not hand out fresh media credentials.
+4. **Tests:** a non-participant is refused; an ended room is refused; the minted token decodes
+   with the expected room, identity and expiry. Verify the token by decoding it rather than by
+   trusting the library — the grant is the security boundary.
+5. **Frontend** (`services/video.ts` + the debate room): fetch the token, wrap the tiles in
+   LiveKit's React room context, and render real tracks. Keep `VideoTile`'s existing shape so
+   the layout and the mute/camera controls survive; wire those controls to the real local
+   track rather than component state.
+6. **Permissions and failure states:** camera or microphone denied, no device present, and
+   connection lost are all normal and must be handled visibly — a black rectangle is not an
+   error message. This is where most of the real work is.
+7. **Verify:** two windows, two accounts, same topic → match → both see and hear each other;
+   muting in one is visible in the other; denying permission shows a real explanation.
+8. **Commit → push → merge** when green.
 
-### Phases 4–9 (summary map)
-- **Phase 4 Matchmaking:** resolve conflict #2; `POST /match` + queue; Waiting Room polls/WS; creates DebateRooms.
-- **Phase 5 Video:** LiveKit Cloud; backend mints room tokens; replace `VideoTile` mock with LiveKit React components.
-- **Phase 6 Chat:** resolve conflict #3; WS endpoint in `app/websocket/`; persist Messages; swap ChatPanel mock transport.
+### Phases 6–10 (summary map)
+- **Phase 6 Chat:** resolve conflict #3; WS endpoint in `app/websocket/`; persist Messages; swap ChatPanel's fixtures for the real transport. Matchmaking can move onto the same socket afterwards if the 2s poll ever feels slow.
 - **Phase 7 AI Fact Check:** isolated `app/ai/` service client + separate AI service (RAG over trusted sources, Claude); `POST /room/{id}/fact-check`; result broadcast into chat; replace `mockFactCheck`.
-- **Phase 8 Ratings:** `POST /room/{id}/rating`; wire RatingForm; enforce one rating per debater per room.
+- **Phase 8 Ratings:** `POST /room/{id}/rating`; wire RatingForm; the one-rating-per-reviewer-per-room rule is already in the schema.
 - **Phase 9 Polish & Deploy:** resolve conflict #1 (Reports); `POST /report` + minimal UI; deploy per doc 09; a11y/dark-mode/QA pass.
-- **Phase 10 Professional UI/UX Redesign** *(added at Aryan's request, 2026-08-10)*: a full visual and interaction overhaul of every screen — design direction and visual identity, typography and spacing system, component polish, motion, empty/loading/error states, and a real responsive pass. Explicitly **last**, because redesigning screens whose behaviour is still moving means paying for the work twice. Everything up to Phase 9 should be judged on whether it *works*, not on whether it looks finished.
+- **Phase 10 Professional UI/UX Redesign:** the full visual overhaul, deliberately last.
 
 Each phase: new branch, plan first, progress report at phase start, blueprint-conflict check, tests where appropriate, merge on green.
 
