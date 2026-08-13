@@ -1,15 +1,22 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
 import { WaitingRoom } from "@/components/waiting-room";
-import { mockDebateRoom } from "@/lib/mock/debate";
 
 export const metadata: Metadata = {
   title: "Finding an opponent",
 };
 
-export default function WaitingPage() {
-  // Phase 1: use the fixed demo room. Real topic-based matchmaking is Phase 4.
-  const { topic, opponent, id } = mockDebateRoom;
+interface WaitingPageProps {
+  searchParams: Promise<{ topic?: string }>;
+}
 
-  return <WaitingRoom topic={topic} opponent={opponent} roomId={id} />;
+export default async function WaitingPage({ searchParams }: WaitingPageProps) {
+  const { topic } = await searchParams;
+
+  // Reaching the queue without a topic means someone edited the URL — there is nothing to
+  // wait for, so send them to pick one.
+  if (!topic) redirect("/browse");
+
+  return <WaitingRoom topicId={topic} />;
 }

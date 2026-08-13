@@ -2,10 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Mic, MicOff, PhoneOff, Video as VideoIcon, VideoOff } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@clerk/nextjs";
+import { Loader2, Mic, MicOff, PhoneOff, Video as VideoIcon, VideoOff } from "lucide-react";
 
 import type { ChatMessage, DebateRoom } from "@/lib/types";
 import { mockFactCheck } from "@/lib/mock/debate";
+import { endRoom, matchKeys } from "@/services/match";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { VideoTile } from "@/components/video-tile";
@@ -27,9 +30,21 @@ const FACT_CHECK_DELAY_MS = 1200;
  */
 export function DebateRoomView({ room, initialMessages }: DebateRoomViewProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const { getToken } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
+
+  const { mutate: endDebate, isPending: isEnding } = useMutation({
+    mutationFn: async () => endRoom(room.id, await getToken()),
+    // Navigate either way: if the room was already closed by the opponent, the debate is
+    // over regardless and stranding the user here would be worse than a silent failure.
+    onSettled: () => {
+      queryClient.removeQueries({ queryKey: matchKeys.state });
+      router.push(`/debate/${room.id}/results`);
+    },
+  });
 
   function appendMessage(message: ChatMessage) {
     setMessages((prev) => [...prev, message]);
@@ -67,9 +82,14 @@ export function DebateRoomView({ room, initialMessages }: DebateRoomViewProps) {
         <Button
           variant="destructive"
           size="sm"
-          onClick={() => router.push(`/debate/${room.id}/results`)}
+          disabled={isEnding}
+          onClick={() => endDebate()}
         >
-          <PhoneOff className="size-4" />
+          {isEnding ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <PhoneOff className="size-4" />
+          )}
           End debate
         </Button>
       </header>

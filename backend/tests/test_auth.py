@@ -225,3 +225,32 @@ async def test_non_bearer_scheme_is_rejected(
 
 async def test_optional_claims_allow_anonymous_callers(verifier: ClerkTokenVerifier) -> None:
     assert await get_optional_claims(None, verifier) is None
+
+
+async def test_a_token_minted_by_a_slightly_faster_clock_is_accepted(
+    verifier: ClerkTokenVerifier, rsa_key_pair: tuple[rsa.RSAPrivateKey, dict[str, Any]]
+) -> None:
+    """Regression: our clock running seconds behind Clerk's rejected valid tokens.
+
+    Clerk stamps `nbf`, so a server that is behind sees fresh tokens as not-yet-valid and
+    401s intermittently — which looked like random matchmaking failures.
+    """
+    private_key, _ = rsa_key_pair
+    now = int(time.time())
+    token = make_token(private_key, iat=now + 15, nbf=now + 15, exp=now + 300)
+
+    user = await verifier.verify(token)
+
+    assert user.clerk_user_id == "user_2abcDEF"
+
+
+async def test_a_token_from_far_in_the_future_is_still_rejected(
+    verifier: ClerkTokenVerifier, rsa_key_pair: tuple[rsa.RSAPrivateKey, dict[str, Any]]
+) -> None:
+    """The leeway must be a tolerance, not an open door."""
+    private_key, _ = rsa_key_pair
+    now = int(time.time())
+    token = make_token(private_key, iat=now + 3600, nbf=now + 3600, exp=now + 7200)
+
+    with pytest.raises(AuthenticationError):
+        await verifier.verify(token)

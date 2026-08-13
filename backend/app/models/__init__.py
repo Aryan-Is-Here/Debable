@@ -6,6 +6,7 @@ autogenerate and the test harness rely on. Import the package, not individual mo
 
 from app.models.debate_room import DebateRoom
 from app.models.fact_check import FactCheck, FactCheckVerdict
+from app.models.match_queue import MatchQueueEntry
 from app.models.message import Message
 from app.models.rating import Rating
 from app.models.topic import Topic, TopicStatus
@@ -15,6 +16,7 @@ __all__ = [
     "DebateRoom",
     "FactCheck",
     "FactCheckVerdict",
+    "MatchQueueEntry",
     "Message",
     "Rating",
     "Topic",

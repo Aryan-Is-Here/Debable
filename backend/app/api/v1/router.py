@@ -5,8 +5,9 @@ Feature routers (topics, match, rooms, ...) are added here as their phases land.
 
 from fastapi import APIRouter
 
-from app.api.v1 import health, topics
+from app.api.v1 import health, match, topics
 
 api_router = APIRouter()
 api_router.include_router(health.router)
 api_router.include_router(topics.router)
+api_router.include_router(match.router)

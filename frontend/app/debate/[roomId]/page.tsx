@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 
-import { DebateRoomView } from "@/components/debate-room-view";
-import { mockDebateRoom, mockMessages } from "@/lib/mock/debate";
+import { DebateRoomLoader } from "@/components/debate-room-loader";
 
 export const metadata: Metadata = {
   title: "Debate room",
@@ -12,9 +11,7 @@ interface DebatePageProps {
 }
 
 export default async function DebatePage({ params }: DebatePageProps) {
-  // Phase 1: any roomId resolves to the demo room; real rooms arrive with the
-  // backend in later phases.
-  await params;
+  const { roomId } = await params;
 
-  return <DebateRoomView room={mockDebateRoom} initialMessages={mockMessages} />;
+  return <DebateRoomLoader roomId={roomId} />;
 }
