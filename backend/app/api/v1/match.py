@@ -11,9 +11,12 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import CurrentUser
+from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.schemas.match import DebateRoomRead, MatchRequest, MatchState
+from app.schemas.video import RoomToken
 from app.services import match as match_service
+from app.services import video as video_service
 
 router = APIRouter(tags=["matchmaking"])
 
@@ -73,6 +76,32 @@ async def leave_queue(current_user: CurrentUser, db: DbSession) -> MatchState:
 )
 async def get_room(room_id: uuid.UUID, current_user: CurrentUser, db: DbSession) -> DebateRoomRead:
     return await match_service.get_room(db, room_id, current_user)
+
+
+@router.post(
+    "/rooms/{room_id}/token",
+    response_model=RoomToken,
+    summary="Get a LiveKit token for this debate",
+    responses={
+        **_AUTH_RESPONSES,
+        403: {"description": "You are not a participant in this debate."},
+        404: {"description": "No such room."},
+        409: {"description": "The debate has ended."},
+        503: {"description": "Video is not configured on this server."},
+    },
+)
+async def get_room_token(
+    room_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DbSession,
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> RoomToken:
+    """Mint a short-lived token scoped to this room and this participant.
+
+    A POST rather than a GET because it creates a credential; it should never be cached or
+    prefetched.
+    """
+    return await video_service.mint_room_token(db, room_id, current_user, settings)
 
 
 @router.post(

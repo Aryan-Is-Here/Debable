@@ -41,6 +41,21 @@ class Settings(BaseSettings):
     # --- CORS ---
     cors_origins: CsvList = Field(default_factory=lambda: ["http://localhost:3000"])
 
+    # --- LiveKit (video) ---
+    # The URL is public — the browser needs it. The key and especially the secret are
+    # signing credentials and must never reach the frontend: the browser only ever receives
+    # a short-lived token minted here.
+    livekit_url: str = ""
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""
+    # How long a room token stays valid. Long enough to cover a debate, short enough that a
+    # leaked one expires on its own.
+    livekit_token_ttl_minutes: int = 120
+
+    @property
+    def livekit_configured(self) -> bool:
+        return bool(self.livekit_url and self.livekit_api_key and self.livekit_api_secret)
+
     # --- Clerk ---
     # Sign-in is owned by Clerk on the client; the backend only verifies its JWTs.
     clerk_issuer: str = ""
