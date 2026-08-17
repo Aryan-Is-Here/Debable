@@ -126,6 +126,29 @@ A message sent in one window appears in the other **without a refresh**, and rel
 window still shows the full history. Fixtures pass the first half of that test and fail the
 second.
 
+### Decisions taken, 2026-08-17
+
+All three questions above were settled before any code was written, and the transport
+resolution was confirmed as proposed.
+
+| Question | Decision |
+|---|---|
+| Transport (conflict #3) | **WebSocket for delivery, `messages` table for persistence.** Confirmed as proposed |
+| Socket authentication | **Authenticate-first frame.** A token in the query string would put a Clerk session JWT into access logs, proxy logs and browser history. `ClerkTokenVerifier` and the provisioning logic are reused — `get_current_user`'s body was extracted into `resolve_user` so both transports share one way of deciding who a caller is |
+| Reconnect | **History over REST, socket streams only new messages**, reconciled by message id. The client opens the socket first and buffers frames while history loads, so nothing sent during the fetch is lost |
+| Matchmaking on the socket | **No.** Left on its 2s poll, as recommended |
+
+Two further decisions came out of reading the code rather than the blueprint:
+
+- **The wire carries `senderId`, not the frontend's viewer-relative `author`.** `ChatMessage`
+  in `lib/types.ts` uses `"you" | "opponent" | "system"`, which cannot survive a broadcast —
+  one frame reaches both debaters and "you" means the opposite thing on each side. The client
+  maps the id against the `userId` the server sends in its `ready` frame, so `lib/types.ts`
+  needed no change.
+- **The handshake checks `Origin` itself.** CORS does not apply to WebSockets: FastAPI's
+  `CORSMiddleware` never sees a handshake, so `cors_origins` would otherwise have constrained
+  the REST API and nothing else.
+
 ---
 
 ## Git history (main)

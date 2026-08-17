@@ -1,6 +1,6 @@
 # Debable — Complete Project Handbook
 
-**Generated:** 2026-07-18 · **Last updated:** 2026-08-15 · **Project state:** Phases 1–5 complete, Phase 6 next
+**Generated:** 2026-07-18 · **Last updated:** 2026-08-17 · **Project state:** Phases 1–6 complete, Phase 7 next
 **Repository:** https://github.com/Aryan-Is-Here/Debable
 **Local path:** `E:\Projects\Debable`
 
@@ -75,7 +75,7 @@ E:\Projects\Debable          (git repo, remote: Aryan-Is-Here/Debable)
 │   │   ├── services/        topic, match, video
 │   │   ├── repositories/    topic, match
 │   │   └── {websocket,ai,utils}/   (empty — Phases 6 and 7)
-│   ├── tests/               109 tests; 63 need Postgres and SKIP without it
+│   ├── tests/               136 tests; 99 need Postgres and SKIP without it
 │   ├── migrations/          Alembic env + 4 revisions (0001-0004)
 │   ├── pyproject.toml       uv-managed deps, ruff + pytest config
 │   ├── alembic.ini
@@ -88,7 +88,7 @@ E:\Projects\Debable          (git repo, remote: Aryan-Is-Here/Debable)
 
 ---
 
-## 4. Everything built so far (Phases 0–5)
+## 4. Everything built so far (Phases 0–6)
 
 ### Phase 0 — Planning ✅
 Repo scaffolded to the blueprint structure; blueprint extracted into `docs/`; git + GitHub wired; root `.gitignore` (Node+Python+env) and README. Opinionated configs (linters, CI, Docker) deliberately deferred to their phases.
@@ -173,6 +173,33 @@ inside the built `api` image.
 15. **Never gate a poll on a mutation.** The waiting room's poll was `enabled` only once the join mutation succeeded; when the mutation didn't resolve, nothing polled while cached data kept the screen looking alive. Read endpoints are safe to call at any time — let the poll be the source of truth and the mutation merely an action. The waiting room also owns its interval explicitly rather than using `refetchInterval`, whose behaviour depends on the interaction of `enabled`, `staleTime` and window focus.
 16. **The waiting room carries a dev-only diagnostic line** (`dev · join=… · status=… · fetch=… · last poll …`), hidden in production. It exists because a spinner looks identical whether the client is polling, failing silently, or not polling at all — three rounds of debugging were spent on that ambiguity. Keep it.
 17. **Migrations are hand-checkable:** after editing models, autogenerate or hand-write the revision, then prove equivalence with `alembic check`. Constraint names come from the naming convention in `app/db/base.py` — name new `CheckConstraint`s with the short form (`score_range`), not the full `ck_…` string, or the convention will double the prefix.
+18. **⚠️ The chat connection registry is per-process.** `app/websocket/registry.py` holds
+    `room_id -> sockets` in memory, so two debaters served by *different* uvicorn workers
+    would each broadcast into an empty set and see none of the other's messages. This is the
+    same trap that ruled out an in-memory matchmaking queue in Phase 4; the difference is
+    that a queue could move into Postgres while a broadcast needs a channel. **Phase 9 must
+    either pin the API to one worker or put a broker behind `broadcast()`.** Persistence is
+    unaffected — messages are committed before they are broadcast, so the worst case is a
+    message that needs a reload to appear, not one that is lost.
+19. **CORS does not apply to WebSockets.** `CORSMiddleware` never sees a handshake, so
+    `cors_origins` constrains the REST API and nothing else. The chat socket checks `Origin`
+    itself in `app/websocket/auth.py`; any future socket must do the same.
+20. **`now()` is the transaction start time in Postgres.** Rows inserted in one transaction
+    share a `created_at` down to the byte, so anything ordered by it needs either a tiebreak
+    that means something or `clock_timestamp()`. Chat messages hit this exactly: with a
+    random-UUID tiebreak, three messages in one transaction came back shuffled. See
+    `app/repositories/message.py`.
+21. **A browser `WebSocket` cannot set an `Authorization` header**, which is why chat
+    authenticates from its first frame rather than a header or a query string. Reuse
+    `resolve_user` in `app/auth/dependencies.py` — it is the shared half of `get_current_user`
+    and exists so HTTP and socket paths cannot disagree about who a caller is.
+22. **Socket tests open their client inside the test body, not a fixture.** `httpx-ws`'s
+    transport holds an anyio cancel scope, and anyio requires the task that entered one to
+    exit it — but pytest-asyncio finalises async fixtures in a different task. A fixture
+    yielding an entered client fails in teardown with "attempted to exit cancel scope in a
+    different task". `open_ws_client` in `tests/conftest.py` is a helper for this reason.
+    Related: httpx-ws wraps handler exceptions in nested `ExceptionGroup`s, so asserting on a
+    close code needs unwrapping (`close_code` in `tests/test_chat_socket.py`).
 
 ### How to run the frontend
 ```bash
@@ -192,7 +219,7 @@ cp .env.example .env      # first time only
 uv sync                   # first time only
 uv run alembic upgrade head
 uv run python -m app      # http://localhost:8000 — docs at /docs
-uv run pytest             # 31 tests, no DB or network required
+uv run pytest             # 136 tests; 99 SKIP without Postgres — always check the skip count
 ```
 Whole stack in containers instead: `docker compose -f docker/docker-compose.yml up -d --build`.
 
@@ -216,12 +243,12 @@ Whole stack in containers instead: `docker compose -f docker/docker-compose.yml 
 | 5 | Local Postgres — Docker wasn't installed | Phase 2 | **Docker Desktop installed** (on `E:`). `docker/docker-compose.yml` runs `postgres:16-alpine` with a healthcheck, plus an optional `api` service. |
 | 2 | `POST /match` mechanics undefined | Phase 4 | **A `match_queue` table in Postgres**, paired inside one transaction with `SELECT … FOR UPDATE SKIP LOCKED`, delivered by the waiting room **polling** every 2s. In-memory was rejected because a deployed backend runs several workers, so per-process queues would leave two people waiting on the same topic in separate queues. Polling rather than WebSocket because the WS layer does not exist until Phase 6. |
 | 7 | `Topic.activeDebaters` was a computed count with nothing behind it | Phase 4 | Now the live count of queue rows per topic, resolved with one grouped query per page. Stale entries are excluded. |
+| 3 | Chat transport: doc 05 REST vs `websocket/` dir | Phase 6 | **Both, for the halves each is good at.** History is REST (`GET /rooms/{id}/messages`) so it stays readable when the socket is down and testable without one; delivery is `WS /rooms/{id}/chat`. Persistence is the `messages` table either way, and a message is committed *before* it is broadcast. Doc 05's `POST /room/{id}/message` is **dropped** — a send that succeeded while the socket was dead would leave the sender staring at nothing. |
 
 ### Open — resolve at the stated phase, never silently
 | # | Conflict / gap | Phase | Working proposal |
 |---|---|---|---|
 | 1 | Reports feature (PRD + `POST /report`) has **no DB table** in doc 04 | 9 | Add `Reports` table (id, room_id, reporter_id, reported_user_id, reason, created_at) |
-| 3 | Chat transport: doc 05 REST vs `websocket/` dir | 6 | WS for delivery, persist via Messages table |
 | 6 | **`Topic.category` exists only in the frontend.** `lib/types.ts` marks it UI-only and Browse filters on it, but doc 04 has no such column. Worse, `getCategories()` derives the list from *existing topics*, so against an empty database the Create form's select is empty and no topic can ever be created. | 3 | **Decided (2026-08-10):** indexed `varchar` column plus a single shared allowlist constant validated by both the zod schema and the backend. No Postgres enum and no `CHECK` constraint — the frontend select must know the list anyway, so a migration would add cost without adding protection. Values: Technology, Science, Politics, Economics, Society, Ethics, Health, Environment, Education, Culture (`Work` folds into Economics; remap the mock topic using it). |
 | 8 | Clerk configuration | 3 | **Resolved (2026-08-10).** Development instance `distinct-kitten-15.clerk.accounts.dev`; `CLERK_ISSUER` set in `backend/.env`, JWKS verified live through `ClerkTokenVerifier` (one RS256 key). Remaining Phase 3 work: add the publishable key to the frontend, mount `<ClerkProvider>`, replace the disabled "Sign in" button, and confirm a real session token verifies end to end. The session token must carry `email`, `username` and `image_url` claims (configured in the Clerk dashboard) — `get_current_user` reads exactly those. |
 
@@ -268,60 +295,93 @@ Testing note that is not a bug: two windows on one machine feed back through the
 
 ---
 
-## 7. How to continue — Phase 6 in extreme detail
+### Phase 6 — Chat ✅ (branch `feature/chat`)
 
-**Goal:** Chat. Real-time text between the two debaters, persisted, replacing ChatPanel's
-fixtures. This is also the phase that makes the fact-check deliverable in Phase 7 — the
-verdict is posted *into the chat*, so chat has to be real first.
+Real-time text between the two debaters, persisted, replacing `ChatPanel`'s fixtures. This
+resolves conflict #3 and is what makes the Phase 7 fact-check deliverable — the verdict is
+posted *into* the chat.
 
-**Branch:** `feature/chat`
+| Area | What exists |
+|---|---|
+| Transport | `WS /api/v1/rooms/{id}/chat` for delivery, `GET /api/v1/rooms/{id}/messages` for history. Persist first, broadcast second |
+| Auth | An authenticate-first frame (`{"type":"auth","token":…}`), not a query-string token, which would put a Clerk JWT in access logs. Reuses `ClerkTokenVerifier` and the new `resolve_user` — one verification path, not two. A silent socket is closed after 5s |
+| Origin | Checked at the handshake, because **CORS does not apply to WebSockets** |
+| Guard | The same `to_room_read()` participant check as `GET /rooms/{id}`, so the two cannot drift apart. Ended rooms stay readable but refuse new messages |
+| Refusals | Before `ready`: close with 4401/4403/4404/4409, mirroring the HTTP status. After `ready`: an error frame, socket stays open — a mistyped empty message should not cost the connection |
+| Echo | The sender is echoed rather than rendering its own copy, so both windows show the row the server stored instead of optimistic state that can disagree with it |
+| Registry | In-process, `room_id -> sockets`. **Does not survive multiple workers** — see §5.18 |
+| Frontend | `hooks/use-debate-chat.ts` owns the socket: auth frame, history on `ready`, live frames buffered during the fetch, reconciliation by id, backoff to 15s. `ChatPanel` gained a connection notice and a dev-only readout |
+| Tests | 27 new (136 total, 0 skipped), including two sockets in one room, ordering, registry cleanup, and that a broadcast message is in the REST history afterwards |
 
-### Resolve conflict #3 first
-Doc 05 specifies REST `POST /room/{id}/message`; the structure has always had a `websocket/`
-directory. **Proposed resolution: WebSocket for delivery, the `messages` table for
-persistence.** REST alone cannot push the other side's message without polling, and unlike a
-matchmaking queue — where two seconds of latency is invisible — chat with a two-second delay
-feels broken.
+**Two bugs found while testing, both real:**
+
+1. **Postgres `now()` is the transaction start time**, so messages written inside one
+   transaction shared a timestamp and the ordered read fell through to its random-UUID
+   tiebreak and returned them *shuffled*. `add_message` now sets `created_at` to
+   `clock_timestamp()` explicitly. No migration — the column default remains the fallback.
+2. **httpx-ws's transport holds an anyio cancel scope**, and pytest-asyncio finalises async
+   fixtures in a different task than it sets them up in, so a fixture yielding an entered
+   client died in teardown. The client is opened inside each test body instead.
+
+---
+
+## 7. How to continue — Phase 7 in extreme detail
+
+**Goal:** The on-demand AI fact-check — the feature the whole product exists to test. Either
+debater submits one specific claim mid-debate, the backend sends *only that claim* to an
+isolated AI service, and the verdict is posted into the chat both people are already reading.
+
+**Branch:** `feature/fact-check`
+
+### What is already in place
+- `app/ai/` is empty and scaffolded for exactly this. `FactCheck` and `FactCheckVerdict`
+  exist in `app/models/fact_check.py`, with `sources` as JSONB and an `explanation` column
+  the UI already renders.
+- Chat is real, so there is somewhere for a verdict to land. `chat_registry.broadcast()` in
+  `app/websocket/registry.py` is how it gets to both windows.
+- The frontend already has `FactCheckDialog` and `FactCheckCard`; `mockFactCheck` in
+  `lib/mock/debate.ts` is the only thing standing in for the service.
 
 ### Decide before writing code
-1. **How the socket authenticates.** A browser `WebSocket` cannot set an `Authorization`
-   header. Either a token in the query string (simple, but tokens leak into access logs) or an
-   authenticate-first message before any other frame is accepted. Prefer the latter. Reuse
-   `ClerkTokenVerifier`; do not write a second verification path.
-2. **History versus stream on reconnect.** Fetch history over REST and stream only new
-   messages, or replay through the socket? Either way messages must reconcile **by id**, not
-   by position, or a reconnect duplicates the conversation.
-3. **Whether matchmaking moves onto this socket.** It can, once one exists — but it is not
-   required and the 2s poll is now well understood. Do not bundle it into this phase.
+1. **How the verdict reaches the chat.** A fact-check is not a `messages` row — `sender_id`
+   is `NOT NULL` and references `users`, so a "system" message has no author to point at.
+   Either add a nullable `sender_id` plus a kind discriminator to `messages` (a migration),
+   or broadcast fact-checks as their own frame type and have the client interleave them the
+   way `debate-room-view.tsx` already interleaves the mock ones. **Prefer the second** — it
+   needs no migration and keeps two genuinely different things apart — but note that
+   fact-checks then do not appear in `GET /rooms/{id}/messages`, so the room needs a
+   `GET /rooms/{id}/fact-checks` for reloads to show them.
+2. **Where the AI service lives.** Doc 10 has it as a separate service the backend calls over
+   HTTP, never listening continuously. Keep that boundary: `app/ai/` is a *client*, and the
+   claim is the only thing that crosses it.
+3. **What happens when the AI is slow or down.** A fact-check is a request against a third
+   party with real latency. It must not block the socket's receive loop — dispatch it and
+   broadcast when it returns — and a failure needs a visible verdict of its own rather than
+   silence.
 
 ### Step-by-step
-4. **Repository** (`app/repositories/message.py`): append and list-by-room. The
-   `(room_id, created_at)` index already exists for exactly this read.
-5. **Service** (`app/services/chat.py`): persist, then broadcast. Guard with the same
-   participant check as `GET /rooms/{id}` — `to_room_read()` in `app/services/match.py`
-   already raises for outsiders. Reject messages to an ended room.
-6. **Connection registry** (`app/websocket/`): room id → connected sockets. In-process is
-   acceptable for now, but **write down that it does not survive multiple workers** — the same
-   trap that ruled out an in-memory matchmaking queue in Phase 4. Deployment in Phase 9 must
-   either pin to one worker or add a broker.
-7. **Endpoint:** `WS /api/v1/rooms/{id}/chat`. Persist on receive, broadcast to both
-   participants, echo back to the sender so the UI has one source of truth rather than
-   optimistic state that can disagree with the server.
-8. **Tests:** a non-participant is refused; a message survives and comes back in history;
-   ordering is stable; an ended room refuses new messages. `httpx`/Starlette's test client
-   supports WebSocket connections.
-9. **Frontend:** replace `ChatPanel`'s fixtures with a hook that opens the socket, loads
-   history, appends live messages and reconnects with backoff. Keep `ChatMessage` from
-   `lib/types.ts` unchanged so the component does not need rewriting.
-10. **Verify:** a message sent in one window appears in the other **without a refresh**, and
-    reloading either window still shows the full history. Fixtures pass the first half of that
-    test and fail the second.
+4. **Client** (`app/ai/`): a typed client for the AI service, timeouts explicit, failures
+   raised as `ServiceUnavailableError` so the existing error envelope covers them.
+5. **Service** (`app/services/fact_check.py`): guard with the same participant check as chat
+   (`to_room_read()`), reject ended rooms, persist the `FactCheck` row, then broadcast.
+6. **Endpoint:** `POST /api/v1/rooms/{id}/fact-check`. A POST because it creates a record and
+   costs money — it must never be retried automatically or prefetched.
+7. **Rate limiting.** One claim at a time per room, at minimum. The MVP has no abuse story and
+   this endpoint is the expensive one.
+8. **Tests:** a non-participant is refused; an ended room is refused; the AI client is stubbed
+   rather than called; a verdict is persisted and broadcast to both sockets; an AI failure
+   produces a refusal, not a hang.
+9. **Frontend:** replace `mockFactCheck` in `debate-room-view.tsx` with a mutation, and take
+   fact-checks from the server instead of local state.
+10. **Verify:** a claim submitted in one window produces a verdict card in *both*, and it is
+    still there after a reload.
 11. **Commit → push → merge** when green.
 
 ### Before you start
-Read §5.14–5.16 and §7 of `docs/COMPLETE-PROGRESS-REPORT.md`. The Phase 4 lessons apply almost
-directly to a socket: instrument before guessing, prove presence rather than promising it on
-exit, and never make a read path depend on a write succeeding.
+Read §5.14–5.19 and §7 of `docs/COMPLETE-PROGRESS-REPORT.md`. Two of those apply immediately:
+the connection registry is per-worker (§5.18), so a broadcast verdict has the same deployment
+constraint chat does; and instrument before guessing (§5.16) — an AI call that is merely slow
+looks exactly like one that is broken.
 
 ### Phases 7–10 (summary map)
 - **Phase 7 AI Fact Check:** isolated `app/ai/` service client + separate AI service (RAG over trusted sources, Claude); `POST /room/{id}/fact-check`; result broadcast into chat; replace `mockFactCheck`.
