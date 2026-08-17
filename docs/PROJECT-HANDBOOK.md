@@ -1,6 +1,6 @@
 # Debable — Complete Project Handbook
 
-**Generated:** 2026-07-18 · **Last updated:** 2026-08-12 · **Project state:** Phases 1–4 complete, Phase 5 next
+**Generated:** 2026-07-18 · **Last updated:** 2026-08-15 · **Project state:** Phases 1–5 complete, Phase 6 next
 **Repository:** https://github.com/Aryan-Is-Here/Debable
 **Local path:** `E:\Projects\Debable`
 
@@ -37,7 +37,7 @@ The blueprint in `docs/` (13 documents: PRD, architecture, database, API spec, U
 | Server state | TanStack Query | ⏳ Planned (when real API exists) |
 | Client state | Zustand | ⏳ Planned (only if needed) |
 | Backend | FastAPI, SQLAlchemy 2 (async), Alembic, PostgreSQL 16, uv | ✅ In use |
-| Video | LiveKit Cloud | 🔵 Phase 5 (needs project credentials) |
+| Video | LiveKit Cloud | ✅ In use |
 | Auth | **Clerk** (backend verifies Clerk JWTs; no login endpoint) | ✅ Backend side done |
 | AI | RAG + LLM (default: Anthropic Claude), isolated service | ⏳ Phase 7 |
 | Local dev | Docker Compose (postgres:16 + api) | ✅ In use |
@@ -55,26 +55,28 @@ E:\Projects\Debable          (git repo, remote: Aryan-Is-Here/Debable)
 │   ├── 01…12-*.md           PRD, architecture, DB, API, UI, roadmap, etc.
 │   ├── 13-prompts/          Per-area prompt templates
 │   └── progress/            Dated progress reports (one per phase start)
-├── frontend/                Next.js app — COMPLETE for Phase 1
+├── frontend/                Next.js app — live against the API (Phases 1, 3, 4, 5)
 │   ├── app/                 Routes (see §4)
 │   ├── components/          Feature components + components/ui/ (shadcn)
 │   ├── hooks/               (empty — for future custom hooks)
 │   ├── lib/                 types.ts, utils.ts, mock/, validation/
-│   ├── services/            (empty — future API client layer)
+│   ├── services/            API clients: api-client, topics, match, video
 │   └── styles/              (empty — globals live in app/globals.css)
-├── backend/                 FastAPI service — COMPLETE for Phase 2
+├── backend/                 FastAPI service — Phases 2-5 complete
 │   ├── app/
 │   │   ├── main.py          App factory: CORS, lifespan, exception handlers
 │   │   ├── __main__.py      Dev entrypoint (`python -m app`) — see §5.11
 │   │   ├── core/            config.py, logging.py, errors.py, platform.py
 │   │   ├── db/              base.py (Base + mixins), session.py (engine, get_db)
 │   │   ├── models/          user, topic, debate_room, message, fact_check, rating
-│   │   ├── schemas/         health.py (Pydantic I/O models)
+│   │   ├── schemas/         health, topic, match, video, user, common (camelCase out)
 │   │   ├── auth/            clerk.py, jwks.py, dependencies.py
-│   │   ├── api/v1/          router.py, health.py
-│   │   └── {services,repositories,websocket,ai,utils}/   (empty — later phases)
-│   ├── tests/               conftest + health/auth/jwks/config suites (31 tests)
-│   ├── migrations/          Alembic env + versions/0001_initial_schema.py
+│   │   ├── api/v1/          router, health, topics, match (incl. video token)
+│   │   ├── services/        topic, match, video
+│   │   ├── repositories/    topic, match
+│   │   └── {websocket,ai,utils}/   (empty — Phases 6 and 7)
+│   ├── tests/               109 tests; 63 need Postgres and SKIP without it
+│   ├── migrations/          Alembic env + 4 revisions (0001-0004)
 │   ├── pyproject.toml       uv-managed deps, ruff + pytest config
 │   ├── alembic.ini
 │   └── .env.example
@@ -86,7 +88,7 @@ E:\Projects\Debable          (git repo, remote: Aryan-Is-Here/Debable)
 
 ---
 
-## 4. Everything built so far (Phases 0–4)
+## 4. Everything built so far (Phases 0–5)
 
 ### Phase 0 — Planning ✅
 Repo scaffolded to the blueprint structure; blueprint extracted into `docs/`; git + GitHub wired; root `.gitignore` (Node+Python+env) and README. Opinionated configs (linters, CI, Docker) deliberately deferred to their phases.
@@ -247,49 +249,81 @@ Two people who pick the same topic are paired into a real, persisted debate room
 
 ---
 
-## 7. How to continue — Phase 5 in extreme detail
+### Phase 5 — Video ✅ (branch `feature/video`)
 
-**Goal:** Video. Replace the mock `VideoTile` placeholders with real one-to-one WebRTC through
-LiveKit, so two matched debaters can actually see and hear each other.
+Real one-to-one WebRTC through LiveKit, replacing the mock tiles.
 
-**Branch:** `feature/video`
+| Area | What exists |
+|---|---|
+| Token | `POST /api/v1/rooms/{id}/token` mints a short-lived LiveKit token. A POST because it creates a credential and must never be cached |
+| Grant | Minimal by design — join one named room, publish and subscribe, nothing else. No create, admin, list, record or ingress. Identity is the local user id, not a client claim |
+| Refusals | Non-participants (403), unknown rooms (404), ended debates (409), unconfigured server (503, fails closed) |
+| Tests | 9 tests that **decode the signed token** rather than trusting the SDK, including asserting administrative powers are absent |
+| Frontend | `components/debate-video.tsx` connects and renders both tracks; mute and camera drive the real local track; permission-denied, no-device, reconnecting and disconnected all have explicit states |
 
-### Needed before live verification
-LiveKit Cloud credentials. Create a free project at cloud.livekit.io, then from its Settings →
-Keys take three values into `backend/.env`: `LIVEKIT_URL` (the `wss://…` project URL),
-`LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`. The secret is a signing key — treat it exactly
-like the Clerk secret: it belongs in `.env` and nowhere else, never in the frontend, never in
-a commit, never pasted into chat. The frontend needs only the `wss://` URL, which is public.
+**Verified live:** both accounts see and hear each other, and mute crosses between windows.
 
-Most of the phase can be built before the credentials exist; only the live call needs them.
+Testing note that is not a bug: two windows on one machine feed back through the speakers
+(use headphones), and Chrome may refuse to hand the same webcam to two tabs.
+
+---
+
+## 7. How to continue — Phase 6 in extreme detail
+
+**Goal:** Chat. Real-time text between the two debaters, persisted, replacing ChatPanel's
+fixtures. This is also the phase that makes the fact-check deliverable in Phase 7 — the
+verdict is posted *into the chat*, so chat has to be real first.
+
+**Branch:** `feature/chat`
+
+### Resolve conflict #3 first
+Doc 05 specifies REST `POST /room/{id}/message`; the structure has always had a `websocket/`
+directory. **Proposed resolution: WebSocket for delivery, the `messages` table for
+persistence.** REST alone cannot push the other side's message without polling, and unlike a
+matchmaking queue — where two seconds of latency is invisible — chat with a two-second delay
+feels broken.
+
+### Decide before writing code
+1. **How the socket authenticates.** A browser `WebSocket` cannot set an `Authorization`
+   header. Either a token in the query string (simple, but tokens leak into access logs) or an
+   authenticate-first message before any other frame is accepted. Prefer the latter. Reuse
+   `ClerkTokenVerifier`; do not write a second verification path.
+2. **History versus stream on reconnect.** Fetch history over REST and stream only new
+   messages, or replay through the socket? Either way messages must reconcile **by id**, not
+   by position, or a reconnect duplicates the conversation.
+3. **Whether matchmaking moves onto this socket.** It can, once one exists — but it is not
+   required and the 2s poll is now well understood. Do not bundle it into this phase.
 
 ### Step-by-step
-1. **Settings** (`app/core/config.py`): the three LiveKit values, all defaulting to empty, plus
-   a `.env.example` entry. Token minting must fail closed with a clear error when unconfigured,
-   the way Clerk verification does.
-2. **Token service** (`app/services/video.py`): mint a short-lived LiveKit access token scoped
-   to one room and one identity. **The room name must be the debate room's id**, and the grant
-   must be issued only to that room's two participants — reuse the participant check in
-   `app/services/match.py`, which already raises `PermissionDeniedError` for outsiders.
-3. **Endpoint** (`app/api/v1/match.py` or a new `video.py`): `POST /api/v1/rooms/{id}/token`
-   returning `{url, token}`. Auth required; 403 for non-participants; 409 once the room has
-   ended, since a finished debate should not hand out fresh media credentials.
-4. **Tests:** a non-participant is refused; an ended room is refused; the minted token decodes
-   with the expected room, identity and expiry. Verify the token by decoding it rather than by
-   trusting the library — the grant is the security boundary.
-5. **Frontend** (`services/video.ts` + the debate room): fetch the token, wrap the tiles in
-   LiveKit's React room context, and render real tracks. Keep `VideoTile`'s existing shape so
-   the layout and the mute/camera controls survive; wire those controls to the real local
-   track rather than component state.
-6. **Permissions and failure states:** camera or microphone denied, no device present, and
-   connection lost are all normal and must be handled visibly — a black rectangle is not an
-   error message. This is where most of the real work is.
-7. **Verify:** two windows, two accounts, same topic → match → both see and hear each other;
-   muting in one is visible in the other; denying permission shows a real explanation.
-8. **Commit → push → merge** when green.
+4. **Repository** (`app/repositories/message.py`): append and list-by-room. The
+   `(room_id, created_at)` index already exists for exactly this read.
+5. **Service** (`app/services/chat.py`): persist, then broadcast. Guard with the same
+   participant check as `GET /rooms/{id}` — `to_room_read()` in `app/services/match.py`
+   already raises for outsiders. Reject messages to an ended room.
+6. **Connection registry** (`app/websocket/`): room id → connected sockets. In-process is
+   acceptable for now, but **write down that it does not survive multiple workers** — the same
+   trap that ruled out an in-memory matchmaking queue in Phase 4. Deployment in Phase 9 must
+   either pin to one worker or add a broker.
+7. **Endpoint:** `WS /api/v1/rooms/{id}/chat`. Persist on receive, broadcast to both
+   participants, echo back to the sender so the UI has one source of truth rather than
+   optimistic state that can disagree with the server.
+8. **Tests:** a non-participant is refused; a message survives and comes back in history;
+   ordering is stable; an ended room refuses new messages. `httpx`/Starlette's test client
+   supports WebSocket connections.
+9. **Frontend:** replace `ChatPanel`'s fixtures with a hook that opens the socket, loads
+   history, appends live messages and reconnects with backoff. Keep `ChatMessage` from
+   `lib/types.ts` unchanged so the component does not need rewriting.
+10. **Verify:** a message sent in one window appears in the other **without a refresh**, and
+    reloading either window still shows the full history. Fixtures pass the first half of that
+    test and fail the second.
+11. **Commit → push → merge** when green.
 
-### Phases 6–10 (summary map)
-- **Phase 6 Chat:** resolve conflict #3; WS endpoint in `app/websocket/`; persist Messages; swap ChatPanel's fixtures for the real transport. Matchmaking can move onto the same socket afterwards if the 2s poll ever feels slow.
+### Before you start
+Read §5.14–5.16 and §7 of `docs/COMPLETE-PROGRESS-REPORT.md`. The Phase 4 lessons apply almost
+directly to a socket: instrument before guessing, prove presence rather than promising it on
+exit, and never make a read path depend on a write succeeding.
+
+### Phases 7–10 (summary map)
 - **Phase 7 AI Fact Check:** isolated `app/ai/` service client + separate AI service (RAG over trusted sources, Claude); `POST /room/{id}/fact-check`; result broadcast into chat; replace `mockFactCheck`.
 - **Phase 8 Ratings:** `POST /room/{id}/rating`; wire RatingForm; the one-rating-per-reviewer-per-room rule is already in the schema.
 - **Phase 9 Polish & Deploy:** resolve conflict #1 (Reports); `POST /report` + minimal UI; deploy per doc 09; a11y/dark-mode/QA pass.

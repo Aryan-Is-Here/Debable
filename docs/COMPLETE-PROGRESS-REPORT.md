@@ -1,7 +1,7 @@
 # Debable — Complete Progress Report
 
-**Written:** 2026-08-14 · **Repository:** https://github.com/Aryan-Is-Here/Debable
-**State:** Phases 0–4 merged to `main`; Phase 5 built on `feature/video`, awaiting live check
+**Written:** 2026-08-14 · **Updated:** 2026-08-15 · **Repository:** https://github.com/Aryan-Is-Here/Debable
+**State:** Phases 0–5 merged to `main`. Phase 6 (Chat) is next.
 
 This is the full narrative: what the product is, how it has been built, why every tool was
 chosen over its alternatives, what remains, and what will bite you. Companion documents:
@@ -185,7 +185,7 @@ invisible inside a single transaction.
 This phase cost three rounds of debugging after it "worked". See §7 — those lessons are the
 most valuable output of the phase.
 
-### Phase 5 — Video 🟡 *(built, not yet verified live)*
+### Phase 5 — Video ✅
 
 `POST /api/v1/rooms/{id}/token` mints a short-lived LiveKit token. A POST because it creates a
 credential and must never be cached.
@@ -199,6 +199,14 @@ than trusting the SDK to have honoured the arguments.
 The frontend renders real tracks and wires mute/camera to the actual local track. Media
 failure states — permission denied, no device, reconnecting, disconnected — get as much
 attention as the happy path, because they are the common cases when strangers meet.
+
+**Verified live:** two accounts in one debate room see and hear each other, and muting on one
+side is visible on the other. That last part is the check that matters — a local-only toggle
+looked identical before this phase.
+
+Notably this phase took one round, against Phase 4's three. The difference was having the
+failure states designed in from the start rather than discovered, and validating the LiveKit
+credentials against the API *before* building on them.
 
 ---
 
@@ -308,4 +316,4 @@ The LiveKit secret is a signing key — the browser only ever receives a minted 
 | Health | 200 with the database up, 503 with it stopped, recovers without restart |
 | Topics | Confirmed by hand: a topic created in the UI survives a reload |
 | Matchmaking | Confirmed by hand: two accounts, two windows, both flip to matched, same room |
-| Video | **Not yet verified live** — the only outstanding check |
+| Video | Confirmed by hand: two accounts see and hear each other; mute crosses between them |

@@ -1,6 +1,6 @@
 # Debable — Handoff
 
-**Written:** 2026-08-14 · **Branch:** `feature/video` (commit `eebdfc4`) · **Working tree:** clean
+**Written:** 2026-08-14 · **Updated:** 2026-08-15 · **Branch:** `main` (commit `4c328c4`) · **Working tree:** clean
 
 Read this first if you are picking the project up mid-flight. For the full reference see
 [`docs/PROJECT-HANDBOOK.md`](docs/PROJECT-HANDBOOK.md); for the narrative and every decision's
@@ -19,8 +19,8 @@ The MVP exists to answer one question: **can AI-assisted fact-checking improve o
 debates?** Every scope decision defers to that. Leaderboards, ELO, always-listening AI,
 moderation, tournaments and premium tiers are explicitly out.
 
-Ten phases, built strictly in order, one branch each. Phases 0–4 are merged to `main`.
-Phase 5 is built and awaiting a live check.
+Ten phases, built strictly in order, one branch each. **Phases 0–5 are merged to `main`.**
+Phase 6 (Chat) is next and has not been started.
 
 ---
 
@@ -33,12 +33,14 @@ Phase 5 is built and awaiting a live check.
 | 2 Backend Foundation | ✅ merged — FastAPI, Postgres, Alembic, Clerk verification, health |
 | 3 Topics | ✅ merged — real topic CRUD, frontend on live data |
 | 4 Matchmaking | ✅ merged — queue, pairing, debate rooms |
-| **5 Video** | 🟡 **built, committed, not yet verified live** |
-| 6–10 | ⏳ not started |
+| 5 Video | ✅ merged — real LiveKit audio and video, verified live |
+| **6 Chat** | 🔵 **next, not started** |
+| 7–10 | ⏳ not started |
 
 **Works end to end today:** sign in with Clerk → browse and search real topics → create a
 topic that survives a reload → queue for a topic → get paired with a second account → land in
-a shared debate room. Aryan has confirmed all of that by hand.
+a shared debate room → **see and hear each other over real WebRTC**, with mute and camera
+state visible to the other side. Aryan has confirmed all of that by hand.
 
 **Verified by tests:** 109 backend tests pass (`cd backend && uv run pytest`). Frontend lint
 and production build are clean. 63 of those tests need Postgres and *skip silently* if Docker
@@ -47,6 +49,9 @@ is not running — check the skip count before trusting a green run.
 **Still mock, by design:** chat messages are fixtures and do not cross between windows
 (Phase 6), the fact-check verdict is deterministic mock output (Phase 7), the rating form does
 not persist (Phase 8), and Profile shows mock stats.
+
+The core loop is now real from sign-in through to a live debate. What remains is making the
+*conversation* real — chat, then the fact-check that the whole product exists to test.
 
 ### Running it
 
@@ -66,24 +71,20 @@ frontend needs `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` a
 
 ---
 
-## 3. Files most recently touched
+## 3. Where Phase 6 will land
 
-Nothing is mid-edit — the tree is clean and Phase 5 is committed. These are the files that
-Phase 5 changed, i.e. where attention should go if the live check fails:
+Nothing is mid-edit — the tree is clean and Phase 5 is merged. These are the files Phase 6
+(Chat) will touch, and the ones worth reading first:
 
-| File | Role |
+| File | Why it matters to Phase 6 |
 |---|---|
-| `backend/app/services/video.py` | Mints the LiveKit token; owns the grant, which is the security boundary |
-| `backend/app/schemas/video.py` | `RoomToken` response shape |
-| `backend/app/api/v1/match.py` | Added `POST /rooms/{id}/token` |
-| `backend/app/core/config.py` | `LIVEKIT_*` settings and `livekit_configured` |
-| `backend/tests/test_video.py` | 9 tests that decode the signed token rather than trust the SDK |
-| `frontend/components/debate-video.tsx` | **New.** Connects to LiveKit, renders both tiles, owns every media failure state |
-| `frontend/services/video.ts` | Token client |
-| `frontend/components/debate-room-view.tsx` | Mock tiles swapped for `DebateVideo`; local mute/camera state deleted |
-| `frontend/components/video-tile.tsx` | **Deleted** — the Phase 1 mock, now unused |
-
----
+| `backend/app/websocket/` | **Empty.** Scaffolded in Phase 0 for exactly this; the WS endpoint goes here |
+| `backend/app/models/message.py` | The `messages` table already exists — room, sender, content, timestamps, and an index on `(room_id, created_at)` for "this room, oldest first" |
+| `backend/app/auth/dependencies.py` | HTTP auth. A socket handshake cannot send an `Authorization` header the same way, so this needs a companion path |
+| `backend/app/services/match.py` | `to_room_read()` holds the participant check that must also guard the socket |
+| `frontend/components/chat-panel.tsx` | Currently renders `initialMessages` fixtures |
+| `frontend/components/debate-room-view.tsx` | Owns `messages` state and `handleSend`; `mockFactCheck` still lives here until Phase 7 |
+| `frontend/lib/mock/debate.ts` | The fixtures to replace |
 
 ## 4. What was tried and failed
 
@@ -135,24 +136,35 @@ instructive than the fixes, and two of them were wrong diagnoses of mine.
 
 ## 5. The next step
 
-**Live-verify Phase 5, then merge.** Nothing else should start first.
+**Start Phase 6 — Chat.** Branch `feature/chat`. Write the progress report to
+`docs/progress/` first; that is the routine at every phase start.
 
-Two browser windows, two different Clerk accounts, same topic → match → Enter debate:
+This resolves the last transport conflict (`PROJECT-HANDBOOK.md` §6, conflict #3): doc 05
+specifies REST `POST /room/{id}/message`, but the structure has always had a `websocket/`
+directory. The resolution to propose: **WebSocket for delivery, the `messages` table for
+persistence** — REST alone cannot push the other side's message without the polling that chat,
+unlike a matchmaking queue, would feel.
 
-1. Both tiles show live video, correctly labelled, with "(you)" on the local one.
-2. **Mute in one window shows as muted in the other.** This is the real check — a local-only
-   toggle looked identical before this phase.
-3. Camera off falls back to the avatar, not a black rectangle.
-4. Deny permission deliberately once: it must produce the explanatory message.
+Decide before writing code:
 
-Two testing artefacts that will otherwise look like bugs: use **headphones** (two windows on
-one machine feed back within seconds), and Chrome may refuse to hand the **same webcam** to
-two tabs — if the second tile stays on its avatar, turn one camera off and confirm the other
-side renders the "camera off" state instead.
+1. **How the socket authenticates.** A browser `WebSocket` cannot set an `Authorization`
+   header. The usual options are a token in the query string (simple, but tokens end up in
+   logs) or a first message that authenticates before anything else is accepted. Prefer the
+   latter, and reuse `ClerkTokenVerifier` rather than inventing a second verification path.
+2. **What happens on reconnect.** Fetch history over REST and stream new messages over the
+   socket, or replay through the socket? Whichever, messages must not duplicate — the client
+   should reconcile by message id, not by position.
+3. **Whether matchmaking moves onto the same socket.** It can, once one exists. Not required;
+   the 2s poll is adequate and now well understood. Do not bundle it into Phase 6.
 
-If it passes: merge `feature/video` into `main`, push, then start Phase 6 (Chat) — which
-resolves the last transport conflict (`docs/PROJECT-HANDBOOK.md` §6, conflict #3) by putting a
-WebSocket in `app/websocket/` and persisting to the existing `messages` table.
+Then: persist on receive, broadcast to both participants, guard the socket with the same
+participant check as `GET /rooms/{id}`, and swap `ChatPanel`'s fixtures for the live
+transport.
 
-If it fails: the browser console plus *whether the opposite window sees your track* isolates
-which side broke. Do not guess — instrument first. That lesson cost three rounds.
+**The check that will prove it:** a message sent in one window appears in the other without a
+refresh, and reloading either window still shows the full history. Fixtures would pass the
+first half of that test and fail the second.
+
+Before starting, read §7 of `docs/COMPLETE-PROGRESS-REPORT.md`. The Phase 4 lessons —
+instrument before guessing, never gate a read on a mutation, presence must be proven rather
+than promised — all apply directly to a socket, and one of them cost three rounds last time.
