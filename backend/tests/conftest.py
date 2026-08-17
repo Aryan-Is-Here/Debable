@@ -11,6 +11,7 @@ Two tiers:
 
 import asyncio
 from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -20,17 +21,20 @@ import pytest_asyncio
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from httpx_ws.transport import ASGIWebSocketTransport
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.sql import text
 
+from app.auth.clerk import ClerkUser, get_token_verifier
 from app.auth.dependencies import get_current_user
 from app.core.config import Settings, get_settings
+from app.core.errors import AuthenticationError
 from app.core.platform import configure_event_loop_policy
 from app.db.base import Base
-from app.db.session import get_db
+from app.db.session import get_db, get_session_scope
 from app.main import create_app
-from app.models import Topic, User
+from app.models import DebateRoom, Topic, User
 
 configure_event_loop_policy()
 
@@ -275,3 +279,95 @@ def make_topic(user: User, **overrides: Any) -> Topic:
     }
     values.update(overrides)
     return Topic(**values)
+
+
+# ---------------------------------------------------------------------------
+# Chat / WebSocket fixtures
+# ---------------------------------------------------------------------------
+
+# Tokens the stub verifier below recognises, mapped to the ``clerk_user_id`` of the users
+# the fixtures create. Anything else is rejected, which is how the socket's auth failure
+# path is exercised.
+STUB_TOKENS = {
+    "token-primary": "user_test_primary",
+    "token-secondary": "user_test_secondary",
+    "token-outsider": "user_test_outsider",
+}
+
+
+class StubVerifier:
+    """Stands in for ``ClerkTokenVerifier`` on the socket.
+
+    Real verification has its own tests (``test_auth.py``, ``test_jwks.py``); re-proving
+    RS256 and JWKS caching on every chat test would only couple them. What matters here is
+    that the socket *asks* a verifier and refuses whatever it rejects.
+    """
+
+    async def verify(self, token: str) -> ClerkUser:
+        clerk_user_id = STUB_TOKENS.get(token)
+        if clerk_user_id is None:
+            raise AuthenticationError("Invalid token.")
+        return ClerkUser(
+            clerk_user_id=clerk_user_id,
+            email=f"{clerk_user_id}@example.com",
+            username=clerk_user_id,
+            avatar_url=None,
+            claims={"sub": clerk_user_id},
+        )
+
+
+@pytest_asyncio.fixture
+async def debate_room(db_session: AsyncSession, user: User, other_user: User) -> DebateRoom:
+    """A live room between ``user`` (token-primary) and ``other_user`` (token-secondary)."""
+    topic = make_topic(user)
+    db_session.add(topic)
+    await db_session.flush()
+
+    room = DebateRoom(topic_id=topic.id, user1_id=user.id, user2_id=other_user.id)
+    db_session.add(room)
+    await db_session.flush()
+    return room
+
+
+@pytest_asyncio.fixture
+async def ws_app(app: FastAPI, db_session: AsyncSession) -> AsyncIterator[FastAPI]:
+    """The app wired for socket tests: stub verifier, shared transactional session.
+
+    ``get_session_scope`` is overridden rather than ``get_db`` because the socket handler
+    deliberately does not hold a request-scoped session — see ``app/db/session.py``. The
+    override hands back the test's single transactional session every time and never closes
+    it, so everything a socket writes is visible to the test and rolled back afterwards.
+    """
+
+    @asynccontextmanager
+    async def override_scope() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_session_scope] = lambda: override_scope
+    app.dependency_overrides[get_token_verifier] = StubVerifier
+
+    async def override_get_db() -> AsyncIterator[AsyncSession]:
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    yield app
+
+
+@asynccontextmanager
+async def open_ws_client(app: FastAPI) -> AsyncIterator[AsyncClient]:
+    """A client that can open WebSockets against the ASGI app.
+
+    ``httpx.AsyncClient`` cannot speak WebSocket on its own, and Starlette's ``TestClient``
+    runs the app in a second thread and event loop — which would not compose with
+    ``db_session``, whose psycopg connection is bound to this one. ``httpx-ws``'s ASGI
+    transport stays in the caller's loop, so the socket and the test share a session.
+
+    Deliberately a helper rather than a fixture: the transport holds an anyio cancel scope,
+    and anyio requires the task that entered one to be the task that exits it. pytest-asyncio
+    finalises async fixtures in a *different* task from the one that sets them up, so a
+    fixture yielding an entered client blows up in teardown with "attempted to exit cancel
+    scope in a different task". Opening it inside the test body keeps both ends in one task.
+    """
+    transport = ASGIWebSocketTransport(app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        yield client

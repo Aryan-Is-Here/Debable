@@ -2,6 +2,10 @@
 
 ``get_current_claims`` verifies the bearer token only. ``get_current_user`` additionally
 resolves — and on first sight creates — the local ``users`` row Clerk's subject maps to.
+
+The resolution step lives in the plain ``resolve_user`` function rather than the dependency
+itself, because a WebSocket handshake authenticates from a frame rather than a header and
+must reach the same provisioning logic without going through FastAPI's dependency system.
 """
 
 import logging
@@ -48,11 +52,8 @@ async def get_optional_claims(credentials: BearerToken, verifier: Verifier) -> C
     return await verifier.verify(credentials.credentials)
 
 
-async def get_current_user(
-    claims: Annotated[ClerkUser, Depends(get_current_claims)],
-    db: DbSession,
-) -> User:
-    """Return the local ``users`` row for the verified subject, creating it if absent.
+async def resolve_user(db: AsyncSession, claims: ClerkUser) -> User:
+    """Return the local ``users`` row for a verified subject, creating it if absent.
 
     Clerk is the identity source; this table exists so debates, topics and ratings have
     something to foreign-key. Provisioning lazily on first authenticated request keeps
@@ -83,6 +84,14 @@ async def get_current_user(
     await db.refresh(user)
     logger.info("Provisioned user from Clerk", extra={"clerk_user_id": claims.clerk_user_id})
     return user
+
+
+async def get_current_user(
+    claims: Annotated[ClerkUser, Depends(get_current_claims)],
+    db: DbSession,
+) -> User:
+    """The signed-in caller, as a dependency. See ``resolve_user``."""
+    return await resolve_user(db, claims)
 
 
 CurrentClaims = Annotated[ClerkUser, Depends(get_current_claims)]
