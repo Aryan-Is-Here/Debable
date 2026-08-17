@@ -4,16 +4,15 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@clerk/nextjs";
-import { Loader2, Mic, MicOff, PhoneOff, Video as VideoIcon, VideoOff } from "lucide-react";
+import { Loader2, PhoneOff } from "lucide-react";
 
 import type { ChatMessage, DebateRoom } from "@/lib/types";
 import { mockFactCheck } from "@/lib/mock/debate";
 import { endRoom, matchKeys } from "@/services/match";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { VideoTile } from "@/components/video-tile";
 import { ChatPanel } from "@/components/chat-panel";
-import { FactCheckDialog } from "@/components/fact-check-dialog";
+import { DebateVideo } from "@/components/debate-video";
 
 interface DebateRoomViewProps {
   room: DebateRoom;
@@ -33,8 +32,6 @@ export function DebateRoomView({ room, initialMessages }: DebateRoomViewProps) {
   const queryClient = useQueryClient();
   const { getToken } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
-  const [muted, setMuted] = useState(false);
-  const [cameraOff, setCameraOff] = useState(false);
 
   const { mutate: endDebate, isPending: isEnding } = useMutation({
     mutationFn: async () => endRoom(room.id, await getToken()),
@@ -96,44 +93,7 @@ export function DebateRoomView({ room, initialMessages }: DebateRoomViewProps) {
 
       {/* Video + chat */}
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[2fr_1fr]">
-        <div className="flex flex-col gap-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <VideoTile user={room.opponent} muted={false} />
-            <VideoTile
-              user={room.you}
-              isYou
-              muted={muted}
-              cameraOff={cameraOff}
-            />
-          </div>
-
-          {/* Controls */}
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <Button
-              variant={muted ? "destructive" : "outline"}
-              size="icon"
-              onClick={() => setMuted((m) => !m)}
-              aria-label={muted ? "Unmute microphone" : "Mute microphone"}
-              aria-pressed={muted}
-            >
-              {muted ? <MicOff className="size-4" /> : <Mic className="size-4" />}
-            </Button>
-            <Button
-              variant={cameraOff ? "destructive" : "outline"}
-              size="icon"
-              onClick={() => setCameraOff((c) => !c)}
-              aria-label={cameraOff ? "Turn camera on" : "Turn camera off"}
-              aria-pressed={cameraOff}
-            >
-              {cameraOff ? (
-                <VideoOff className="size-4" />
-              ) : (
-                <VideoIcon className="size-4" />
-              )}
-            </Button>
-            <FactCheckDialog onSubmitClaim={handleFactCheck} />
-          </div>
-        </div>
+        <DebateVideo room={room} onFactCheck={handleFactCheck} />
 
         <ChatPanel
           room={room}
