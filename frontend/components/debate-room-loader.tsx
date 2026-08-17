@@ -7,7 +7,6 @@ import { AlertCircle, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { DebateRoomView } from "@/components/debate-room-view";
-import { mockMessages } from "@/lib/mock/debate";
 import { ApiError } from "@/services/api-client";
 import { getRoom, matchKeys } from "@/services/match";
 
@@ -16,7 +15,7 @@ import { getRoom, matchKeys } from "@/services/match";
  *
  * Client-side rather than a server fetch because the request needs the caller's Clerk
  * token: rooms are private to their two participants, and the backend enforces that with a
- * 403. Chat messages are still fixtures — the transport lands in Phase 6.
+ * 403. Chat opens its own socket from inside the view, once the room is known.
  */
 export function DebateRoomLoader({ roomId }: { roomId: string }) {
   const router = useRouter();
@@ -78,7 +77,7 @@ export function DebateRoomLoader({ roomId }: { roomId: string }) {
     );
   }
 
-  return <DebateRoomView room={room} initialMessages={mockMessages} />;
+  return <DebateRoomView room={room} />;
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
