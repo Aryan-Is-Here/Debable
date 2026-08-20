@@ -1,7 +1,7 @@
 # Debable — Complete Progress Report
 
 **Written:** 2026-08-14 · **Updated:** 2026-08-15 · **Repository:** https://github.com/Aryan-Is-Here/Debable
-**State:** Phases 0–5 merged to `main`. Phase 6 (Chat) is next.
+**State:** Phases 0–6 merged to `main`. Phase 7 (AI Fact Check) is next.
 
 This is the full narrative: what the product is, how it has been built, why every tool was
 chosen over its alternatives, what remains, and what will bite you. Companion documents:
@@ -200,24 +200,74 @@ The frontend renders real tracks and wires mute/camera to the actual local track
 failure states — permission denied, no device, reconnecting, disconnected — get as much
 attention as the happy path, because they are the common cases when strangers meet.
 
-**Verified live:** two accounts in one debate room see and hear each other, and muting on one
-side is visible on the other. That last part is the check that matters — a local-only toggle
-looked identical before this phase.
+**Verified live:** two accounts in one debate room see and hear each other.
 
-Notably this phase took one round, against Phase 4's three. The difference was having the
-failure states designed in from the start rather than discovered, and validating the LiveKit
-credentials against the API *before* building on them.
+**Two claims this section used to make that were wrong**, found by hand while checking Phase 6
+and fixed in `85f1dd0`:
+
+- *"Muting on one side is visible on the other."* The **video** half crossed; the microphone
+  indicator never did. `ParticipantFrame` took a `muted` prop that the remote tile did not
+  pass, so an opponent always rendered as unmuted however loudly their own screen disagreed.
+- Presence was inferred from whether a camera track existed. Turning a camera off
+  *unpublishes* that track, so "camera off" and "never joined" were indistinguishable, and one
+  side showed "Waiting for them to join…" over someone who had been there the whole time. Only
+  the person with their camera off saw the room correctly, which is why it read as one window
+  working and one broken rather than as a rendering bug.
+
+The lesson is not about LiveKit. Both bugs are the same mistake: **inferring a fact from a
+proxy that usually correlates with it.** Presence was read off a track, mute off nothing at
+all. Phase 4 recorded the same shape — presence must be proven, never assumed — and it was
+re-learned here anyway.
+
+Notably this phase took one round of debugging, against Phase 4's three. But "one round" was
+measured against the bugs *found at the time*; two more survived into Phase 6 because the
+manual check exercised the happy path with both cameras on. A check that only covers the
+configuration you expect will keep reporting success.
+
+### Phase 6 — Chat ✅
+
+Resolved **conflict #3** by using both transports, for the halves each is good at: history is
+REST, delivery is a WebSocket. A REST-only chat cannot push the other side's message without
+polling, and two seconds of latency that is invisible in a matchmaking queue makes a
+conversation feel broken. Doc 05's `POST /room/{id}/message` was dropped outright — a send
+that succeeds while the socket is dead leaves the sender staring at nothing.
+
+The socket authenticates from its first frame rather than a query-string token, which would
+have put a Clerk session JWT into access logs, proxy logs and browser history. The cost is
+that a socket must be accepted before it can be read from, so an unauthenticated connection
+exists briefly; a five-second timeout bounds it. `ClerkTokenVerifier` and the provisioning
+logic are reused rather than reimplemented — `get_current_user`'s body became `resolve_user`
+so the HTTP and socket paths cannot disagree about who a caller is.
+
+Three decisions worth keeping:
+
+- **The wire carries `senderId`, not `author`.** The frontend's `ChatMessage` is
+  viewer-relative (`"you" | "opponent"`), which cannot survive a broadcast — one frame reaches
+  both debaters and "you" means the opposite thing on each side. The client maps the id
+  against the `userId` the server sends on connect, so `lib/types.ts` never changed.
+- **The sender is echoed rather than rendering its own copy.** Both windows then show the row
+  the database holds instead of optimistic state that can quietly disagree with it.
+- **Refusals before `ready` close the socket; refusals after it do not.** A mistyped empty
+  message should not cost someone their connection.
+
+**Two bugs found while testing, both real, neither guessed at:**
+
+1. Postgres `now()` is the *transaction* start time, so three messages written in one
+   transaction shared a timestamp to the byte and the ordered read fell through to its
+   random-UUID tiebreak — returning them shuffled. `add_message` now sets `created_at` to
+   `clock_timestamp()`. No migration: the column default remains the fallback.
+2. `httpx-ws`'s transport holds an anyio cancel scope, and pytest-asyncio finalises async
+   fixtures in a different task than it sets them up in, so a fixture yielding an entered
+   client died in teardown. The client is opened inside each test body instead.
+
+The connection registry is per-process and **does not survive multiple workers** — the same
+shape of trap that ruled out an in-memory matchmaking queue in Phase 4, recorded in
+`registry.py` and §7 as a Phase 9 deployment constraint. Persistence is unaffected, because
+messages are committed before they are broadcast.
 
 ---
 
 ## 5. What remains
-
-### Phase 6 — Chat
-Resolves **conflict #3** (doc 05 says REST, the structure has `websocket/`). Plan: WebSocket in
-`app/websocket/` for delivery, persisted to the existing `messages` table, replacing
-ChatPanel's fixtures. Matchmaking can move onto the same socket afterwards if the poll ever
-feels slow. Watch for: authenticating the socket handshake with a Clerk token, and reconnect
-without duplicating messages.
 
 ### Phase 7 — AI Fact Check
 The differentiator. Isolated `app/ai/` client plus a separate AI service doing RAG over trusted
@@ -263,8 +313,10 @@ the backend with `uv run python -m app`, never bare `uvicorn`; `app/core/platfor
 policy before the loop is created, and Alembic does the same. Linux, macOS and Docker are
 unaffected.
 
-**The test suite skips silently without Docker.** 63 of 109 tests need Postgres and skip when
-it is unreachable, so a "green" run can be nearly meaningless. Check the skip count.
+**The test suite skips silently without Docker.** 99 of 136 tests need Postgres and skip when
+it is unreachable, so a "green" run can be nearly meaningless. Check the skip count — and
+check it against a measured figure, not a remembered one: this document claimed "63 of 109"
+for two phases and the real split was never verified.
 
 **Clock skew breaks auth intermittently.** This machine measured 13.3s behind Clerk, and Clerk
 stamps `nbf`, so fresh tokens were rejected as not-yet-valid. Verification now allows 60s of
@@ -290,6 +342,18 @@ failing silently, or not polling at all. The dev-only readout in `waiting-room.t
 because that ambiguity cost three debugging rounds. Keep it, and reach for that kind of
 evidence first.
 
+**The chat connection registry is per-worker.** Two debaters served by different uvicorn
+workers would each broadcast into an empty set. Phase 9 must pin one worker or add a broker.
+Messages are committed before broadcast, so the failure mode is "needs a reload", not "lost".
+
+**CORS does not apply to WebSockets.** `CORSMiddleware` never sees a handshake, so
+`cors_origins` constrains the REST API and nothing else. The chat socket checks `Origin`
+itself; any future socket must too.
+
+**`now()` is the transaction start time in Postgres.** Anything ordered by `created_at` needs
+a meaningful tiebreak or `clock_timestamp()`, or rows written together come back in arbitrary
+order.
+
 **base-nova is not Radix.** Compose with the `render` prop, never `asChild`. Use `ButtonLink`
 for navigation and `Button` for actions.
 
@@ -309,11 +373,12 @@ The LiveKit secret is a signing key — the browser only ever receives a minted 
 
 | Area | Evidence |
 |---|---|
-| Backend suite | 109 tests pass, including concurrent pairing, queue liveness and token grants |
+| Backend suite | 136 tests pass, 0 skipped, including concurrent pairing, queue liveness, token grants and two sockets exchanging messages in one room |
 | Lint/format | `ruff check`, `ruff format --check`, `eslint` all clean |
 | Build | `npm run build` compiles all 9 routes, no type errors |
 | Migrations | `alembic check` reports no drift; up/down round trip verified |
 | Health | 200 with the database up, 503 with it stopped, recovers without restart |
 | Topics | Confirmed by hand: a topic created in the UI survives a reload |
 | Matchmaking | Confirmed by hand: two accounts, two windows, both flip to matched, same room |
-| Video | Confirmed by hand: two accounts see and hear each other; mute crosses between them |
+| Video | Confirmed by hand: two accounts see and hear each other. Camera-off and mute state both cross correctly as of `85f1dd0` — before that, neither did |
+| Chat | 27 automated tests including two sockets in one room; refusals (bad token, silence, disallowed origin) confirmed against the running server. **Confirmed by hand:** messages cross both ways without a refresh and survive a reload |

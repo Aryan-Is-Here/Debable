@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@clerk/nextjs";
@@ -8,6 +8,7 @@ import { Loader2, PhoneOff } from "lucide-react";
 
 import type { ChatMessage, DebateRoom } from "@/lib/types";
 import { mockFactCheck } from "@/lib/mock/debate";
+import { useDebateChat } from "@/hooks/use-debate-chat";
 import { endRoom, matchKeys } from "@/services/match";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,22 +17,25 @@ import { DebateVideo } from "@/components/debate-video";
 
 interface DebateRoomViewProps {
   room: DebateRoom;
-  initialMessages: ChatMessage[];
 }
 
 /** Simulated AI latency for the mock fact-check (ms). */
 const FACT_CHECK_DELAY_MS = 1200;
 
 /**
- * Debate Room orchestrator: owns chat + control state and wires the
- * fact-check flow. Video, chat transport, and the AI service are all mocked
- * in Phase 1 (they arrive in Phases 5–7).
+ * Debate Room orchestrator: owns the controls and wires the fact-check flow.
+ *
+ * Chat is real as of Phase 6 — the transcript comes from the server through
+ * `useDebateChat`, not from local state. Fact-check results are still generated on the
+ * client and kept alongside it until Phase 7 gives them a real service and a place in the
+ * `messages` table.
  */
-export function DebateRoomView({ room, initialMessages }: DebateRoomViewProps) {
+export function DebateRoomView({ room }: DebateRoomViewProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { getToken } = useAuth();
-  const [messages, setMessages] = useState<ChatMessage[]>(initialMessages);
+  const chat = useDebateChat(room.id);
+  const [factCheckMessages, setFactCheckMessages] = useState<ChatMessage[]>([]);
 
   const { mutate: endDebate, isPending: isEnding } = useMutation({
     mutationFn: async () => endRoom(room.id, await getToken()),
@@ -43,29 +47,30 @@ export function DebateRoomView({ room, initialMessages }: DebateRoomViewProps) {
     },
   });
 
-  function appendMessage(message: ChatMessage) {
-    setMessages((prev) => [...prev, message]);
-  }
-
-  function handleSend(content: string) {
-    appendMessage({
-      id: `m_${Date.now()}`,
-      author: "you",
-      content,
-      createdAt: new Date().toISOString(),
-    });
-  }
+  // Server transcript plus the client-only fact-check cards, interleaved by time. Kept
+  // separate rather than appended into one array because only one of them is real: the
+  // chat half is authoritative and can change under a reconnect, while the fact-check half
+  // is local until Phase 7.
+  const messages = useMemo(() => {
+    if (factCheckMessages.length === 0) return chat.messages;
+    return [...chat.messages, ...factCheckMessages].sort((a, b) =>
+      a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0,
+    );
+  }, [chat.messages, factCheckMessages]);
 
   async function handleFactCheck(claim: string) {
     // Mock the AI service round-trip; result lands in chat as a system message.
     await new Promise((resolve) => setTimeout(resolve, FACT_CHECK_DELAY_MS));
-    appendMessage({
-      id: `m_fc_${Date.now()}`,
-      author: "system",
-      content: "",
-      createdAt: new Date().toISOString(),
-      factCheck: mockFactCheck(claim),
-    });
+    setFactCheckMessages((previous) => [
+      ...previous,
+      {
+        id: `m_fc_${Date.now()}`,
+        author: "system",
+        content: "",
+        createdAt: new Date().toISOString(),
+        factCheck: mockFactCheck(claim),
+      },
+    ]);
   }
 
   return (
@@ -98,7 +103,10 @@ export function DebateRoomView({ room, initialMessages }: DebateRoomViewProps) {
         <ChatPanel
           room={room}
           messages={messages}
-          onSend={handleSend}
+          onSend={chat.send}
+          status={chat.status}
+          error={chat.error}
+          debug={chat.debug}
           className="min-h-[24rem] lg:min-h-0"
         />
       </div>

@@ -8,10 +8,12 @@ import {
   RoomAudioRenderer,
   VideoTrack,
   useConnectionState,
+  useIsMuted,
   useLocalParticipant,
+  useRemoteParticipants,
   useTracks,
 } from "@livekit/components-react";
-import { ConnectionState, Track } from "livekit-client";
+import { ConnectionState, Track, type Participant } from "livekit-client";
 import {
   AlertCircle,
   Loader2,
@@ -117,6 +119,12 @@ function DebateStage({ room, onFactCheck }: DebateVideoProps) {
   const localTrack = tracks.find((t) => t.participant.isLocal);
   const remoteTrack = tracks.find((t) => !t.participant.isLocal);
 
+  // Presence comes from the participant list, never from whether a camera track exists.
+  // Turning a camera off unpublishes its track, so "no track" and "not here" look identical
+  // from `useTracks` alone — which made a debater with their camera off appear, to the other
+  // side only, as though they had never joined. A debate is 1v1, so there is at most one.
+  const [opponent] = useRemoteParticipants();
+
   const micOn = localParticipant.isMicrophoneEnabled;
   const cameraOn = localParticipant.isCameraEnabled;
 
@@ -179,11 +187,15 @@ function DebateStage({ room, onFactCheck }: DebateVideoProps) {
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <ParticipantFrame
-          user={room.opponent}
-          track={remoteTrack}
-          waitingLabel="Waiting for them to join…"
-        />
+        {opponent ? (
+          <RemoteParticipantFrame
+            user={room.opponent}
+            participant={opponent}
+            track={remoteTrack}
+          />
+        ) : (
+          <ParticipantFrame user={room.opponent} waitingLabel="Waiting for them to join…" />
+        )}
         <ParticipantFrame user={room.you} track={localTrack} isYou muted={!micOn} />
       </div>
 
@@ -210,6 +222,29 @@ function DebateStage({ room, onFactCheck }: DebateVideoProps) {
       </div>
     </div>
   );
+}
+
+/**
+ * The opponent's frame, once they are actually in the room.
+ *
+ * Split out because the mute indicator needs a hook, and hooks cannot be called
+ * conditionally — there is no participant to ask about until someone has joined. Rendering
+ * a different component in that case is fine; calling `useIsMuted` conditionally is not.
+ */
+function RemoteParticipantFrame({
+  user,
+  participant,
+  track,
+}: {
+  user: UserSummary;
+  participant: Participant;
+  track?: ReturnType<typeof useTracks>[number];
+}) {
+  // Their real microphone state. Without this the opponent's tile always showed an
+  // unmuted mic, however loudly the icon on their own screen disagreed.
+  const muted = useIsMuted({ participant, source: Track.Source.Microphone });
+
+  return <ParticipantFrame user={user} track={track} muted={muted} />;
 }
 
 /** One participant's frame: their video when publishing, their avatar when not. */
@@ -241,9 +276,7 @@ function ParticipantFrame({
             {user.avatarUrl && <AvatarImage src={user.avatarUrl} alt="" />}
             <AvatarFallback>{initials(user.username)}</AvatarFallback>
           </Avatar>
-          {!track && waitingLabel && (
-            <p className="text-xs text-muted-foreground">{waitingLabel}</p>
-          )}
+          {waitingLabel && <p className="text-xs text-muted-foreground">{waitingLabel}</p>}
         </div>
       )}
 
