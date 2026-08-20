@@ -176,19 +176,25 @@ is merely slow looks exactly like one that is broken, so instrument it before gu
 
 ---
 
-## 6. Outstanding manual check
+## 6. Manual verification — done
 
-Phase 6's automated coverage is good — 27 tests, including two sockets exchanging a message in
-one room, and the refusal paths confirmed against a running server. **The two-window check by
-hand has not been done yet.** Worth ten minutes before building Phase 7 on top:
-
-1. Sign in as two different accounts in two windows, queue the same topic, land in one room.
-2. Type in window A — it should appear in window B with no refresh. Type in B, appears in A.
-3. **Reload either window — the full history should still be there.** This is the half that
-   fixtures used to fail.
-4. Stop the backend: both panels should show "Reconnecting to chat…" and disable the composer.
-   Restart it: they reconnect and the conversation is **not** duplicated.
-5. End the debate, then try to send: refused with a message, socket stays open.
+Confirmed by hand on 2026-08-17, two accounts in two windows: messages cross both ways without
+a refresh, and the full history survives a reload of either window. That is the check the
+phase existed to pass.
 
 The dev-only line under the composer (`dev · ws=… · msgs=… · you=… · last=…`) tells you which
 state the socket is actually in — use it rather than inferring from a quiet panel.
+
+**That same session found two Phase 5 video bugs** (fixed in `85f1dd0`), and how they were
+missed matters more than what they were:
+
+- Participant presence was inferred from whether a camera track existed. Turning a camera off
+  unpublishes the track, so "camera off" and "never joined" were indistinguishable — one side
+  showed "Waiting for them to join…" over someone who had been there all along.
+- The opponent's tile never passed its `muted` prop, so an opponent always rendered as
+  unmuted. The handbook's claim that "mute crosses between windows" was only true of video.
+
+Both survived a Phase 5 manual check **that passed** — because that check ran with both
+cameras on. When verifying by hand, toggle the optional things: camera off, mic muted, one tab
+closed. A check that only covers the configuration you expect will keep reporting success.
+See handbook §5.23–5.24.

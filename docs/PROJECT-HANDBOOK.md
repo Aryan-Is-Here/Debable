@@ -200,6 +200,17 @@ inside the built `api` image.
     different task". `open_ws_client` in `tests/conftest.py` is a helper for this reason.
     Related: httpx-ws wraps handler exceptions in nested `ExceptionGroup`s, so asserting on a
     close code needs unwrapping (`close_code` in `tests/test_chat_socket.py`).
+23. **Never infer a fact from a proxy that merely correlates with it.** Two Phase 5 bugs were
+    the same mistake: participant *presence* was read off whether a camera track existed
+    (turning a camera off unpublishes the track, so "camera off" and "never joined" became
+    indistinguishable), and the opponent's *mute state* was read off nothing at all — the tile
+    never passed the prop. Ask the source of truth: `useRemoteParticipants()` for presence,
+    `useIsMuted()` for mute. This is the same lesson as §5.14 (presence is proven, never
+    promised) and it was re-learned anyway, which is why it is written twice.
+24. **Test the configuration you do not expect.** Both bugs above survived a Phase 5 manual
+    check that passed, because that check ran with both cameras on. They surfaced in Phase 6
+    only because someone happened to have a camera off. When verifying by hand, toggle the
+    optional things — camera, mic, one tab closed — not just the happy path.
 
 ### How to run the frontend
 ```bash
@@ -288,7 +299,14 @@ Real one-to-one WebRTC through LiveKit, replacing the mock tiles.
 | Tests | 9 tests that **decode the signed token** rather than trusting the SDK, including asserting administrative powers are absent |
 | Frontend | `components/debate-video.tsx` connects and renders both tracks; mute and camera drive the real local track; permission-denied, no-device, reconnecting and disconnected all have explicit states |
 
-**Verified live:** both accounts see and hear each other, and mute crosses between windows.
+**Verified live:** both accounts see and hear each other.
+
+⚠️ **This section used to claim "mute crosses between windows". It did not.** Two bugs in
+`ParticipantFrame` survived until they were found by hand during Phase 6 (fixed in `85f1dd0`):
+the opponent's tile never passed the `muted` prop, so an opponent always rendered as unmuted;
+and presence was inferred from whether a camera track existed, so a debater who turned their
+camera off appeared — to the other side only — never to have joined. Presence now comes from
+`useRemoteParticipants()`. See §5.23.
 
 Testing note that is not a bug: two windows on one machine feed back through the speakers
 (use headphones), and Chrome may refuse to hand the same webcam to two tabs.

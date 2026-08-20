@@ -200,13 +200,29 @@ The frontend renders real tracks and wires mute/camera to the actual local track
 failure states — permission denied, no device, reconnecting, disconnected — get as much
 attention as the happy path, because they are the common cases when strangers meet.
 
-**Verified live:** two accounts in one debate room see and hear each other, and muting on one
-side is visible on the other. That last part is the check that matters — a local-only toggle
-looked identical before this phase.
+**Verified live:** two accounts in one debate room see and hear each other.
 
-Notably this phase took one round, against Phase 4's three. The difference was having the
-failure states designed in from the start rather than discovered, and validating the LiveKit
-credentials against the API *before* building on them.
+**Two claims this section used to make that were wrong**, found by hand while checking Phase 6
+and fixed in `85f1dd0`:
+
+- *"Muting on one side is visible on the other."* The **video** half crossed; the microphone
+  indicator never did. `ParticipantFrame` took a `muted` prop that the remote tile did not
+  pass, so an opponent always rendered as unmuted however loudly their own screen disagreed.
+- Presence was inferred from whether a camera track existed. Turning a camera off
+  *unpublishes* that track, so "camera off" and "never joined" were indistinguishable, and one
+  side showed "Waiting for them to join…" over someone who had been there the whole time. Only
+  the person with their camera off saw the room correctly, which is why it read as one window
+  working and one broken rather than as a rendering bug.
+
+The lesson is not about LiveKit. Both bugs are the same mistake: **inferring a fact from a
+proxy that usually correlates with it.** Presence was read off a track, mute off nothing at
+all. Phase 4 recorded the same shape — presence must be proven, never assumed — and it was
+re-learned here anyway.
+
+Notably this phase took one round of debugging, against Phase 4's three. But "one round" was
+measured against the bugs *found at the time*; two more survived into Phase 6 because the
+manual check exercised the happy path with both cameras on. A check that only covers the
+configuration you expect will keep reporting success.
 
 ### Phase 6 — Chat ✅
 
@@ -364,5 +380,5 @@ The LiveKit secret is a signing key — the browser only ever receives a minted 
 | Health | 200 with the database up, 503 with it stopped, recovers without restart |
 | Topics | Confirmed by hand: a topic created in the UI survives a reload |
 | Matchmaking | Confirmed by hand: two accounts, two windows, both flip to matched, same room |
-| Video | Confirmed by hand: two accounts see and hear each other; mute crosses between them |
-| Chat | 27 automated tests including two sockets in one room; refusals (bad token, silence, disallowed origin) also confirmed against the running server. **The two-window check by hand is still outstanding** |
+| Video | Confirmed by hand: two accounts see and hear each other. Camera-off and mute state both cross correctly as of `85f1dd0` — before that, neither did |
+| Chat | 27 automated tests including two sockets in one room; refusals (bad token, silence, disallowed origin) confirmed against the running server. **Confirmed by hand:** messages cross both ways without a refresh and survive a reload |
