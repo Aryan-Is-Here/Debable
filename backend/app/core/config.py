@@ -56,6 +56,25 @@ class Settings(BaseSettings):
     def livekit_configured(self) -> bool:
         return bool(self.livekit_url and self.livekit_api_key and self.livekit_api_secret)
 
+    # --- Gemini (AI fact-check) ---
+    # The key is optional by design: with none set the application falls back to a stub
+    # provider, so a fresh clone runs the whole debate flow without any credentials.
+    #
+    # Gemini rather than Claude because this project has no budget, and Gemini 2.5 Flash is
+    # the only model whose Google Search grounding is free of charge. That amends a Phase 0
+    # decision — see `docs/PROJECT-HANDBOOK.md` §6.
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
+    fact_check_timeout_seconds: float = 45.0
+    # Per room, per hour. This exists to stop one demo exhausting a daily free quota, which
+    # is a different job from protecting the server — hence a low number.
+    fact_check_rate_limit_per_hour: int = 10
+
+    @property
+    def fact_check_configured(self) -> bool:
+        """Whether a real provider can be built. False means the stub answers."""
+        return bool(self.gemini_api_key)
+
     # --- Clerk ---
     # Sign-in is owned by Clerk on the client; the backend only verifies its JWTs.
     clerk_issuer: str = ""
