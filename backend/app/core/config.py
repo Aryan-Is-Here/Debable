@@ -66,9 +66,13 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash"
     fact_check_timeout_seconds: float = 45.0
-    # Per room, per hour. This exists to stop one demo exhausting a daily free quota, which
-    # is a different job from protecting the server — hence a low number.
+    # Per room, per hour. Stops one debate spamming the button.
     fact_check_rate_limit_per_hour: int = 10
+    # Across the whole deployment, per day. The per-room limit cannot protect a *shared*
+    # quota — thirty rooms doing ten checks each is 300 requests, and on a 250/day free tier
+    # every fact-check after that fails for everyone. Set below the real quota so the
+    # service refuses with its own clear message instead of hitting Google's 429.
+    fact_check_daily_budget: int = 200
 
     @property
     def fact_check_configured(self) -> bool:

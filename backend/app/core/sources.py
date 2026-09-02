@@ -90,16 +90,27 @@ def source_domain(url: str) -> str | None:
     return host.removeprefix("www.")
 
 
-def is_trusted_source(url: str) -> bool:
-    """Whether a citation URL may be shown to debaters.
+def is_trusted_domain(host: str | None) -> bool:
+    """Whether a bare hostname belongs to a trusted source.
 
-    Subdomains count: ``data.worldbank.org`` is the World Bank. The check is on the
+    Takes a hostname rather than a URL because that is what the provider actually gives us.
+    Gemini's grounding metadata returns every citation's ``uri`` as a
+    ``vertexaisearch.cloud.google.com`` redirect link rather than the publisher's own URL,
+    and carries the real publisher in a separate ``domain`` field. Filtering on the URI
+    would therefore reject every citation, including the good ones.
+
+    Subdomains count: ``data.worldbank.org`` is the World Bank. Matching is on the
     hostname's segment boundary rather than a substring, so ``reuters.com.example.net``
     does not pass by containing a trusted name.
     """
-    host = source_domain(url)
-    if host is None:
+    if not host:
         return False
+    host = host.lower().removeprefix("www.")
     if any(host == domain or host.endswith(f".{domain}") for domain in TRUSTED_SOURCE_DOMAINS):
         return True
     return any(host.endswith(suffix) for suffix in TRUSTED_SOURCE_SUFFIXES)
+
+
+def is_trusted_source(url: str) -> bool:
+    """Whether a citation URL may be shown to debaters."""
+    return is_trusted_domain(source_domain(url))

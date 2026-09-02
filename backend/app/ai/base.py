@@ -34,10 +34,18 @@ class FactCheckUnavailable(ServiceUnavailableError):
 
 @dataclass(frozen=True, slots=True)
 class ProviderSource:
-    """One citation. Mirrors ``FactCheckSource`` in ``frontend/lib/types.ts``."""
+    """One citation. ``title`` and ``url`` mirror ``FactCheckSource`` in ``lib/types.ts``."""
 
     title: str
     url: str
+    domain: str | None = None
+    """The publishing domain, when the provider reports it separately from the URL.
+
+    Gemini's grounding metadata returns ``url`` as a ``vertexaisearch.cloud.google.com``
+    redirect link and names the real publisher here, so this — not ``url`` — is what the
+    trusted-source filter must judge. Providers whose URLs are already the publisher's may
+    leave it ``None``, and the filter falls back to the URL's host.
+    """
 
 
 @dataclass(frozen=True, slots=True)

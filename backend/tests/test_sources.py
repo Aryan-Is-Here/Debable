@@ -7,7 +7,7 @@ than its size suggests.
 
 import pytest
 
-from app.core.sources import is_trusted_source, source_domain
+from app.core.sources import is_trusted_domain, is_trusted_source, source_domain
 
 
 @pytest.mark.parametrize(
@@ -100,3 +100,28 @@ def test_source_domain_strips_www_and_lowercases() -> None:
 
 def test_source_domain_returns_none_for_a_non_url() -> None:
     assert source_domain("reuters.com") is None
+
+
+# --- Bare-hostname checks --------------------------------------------------------------
+#
+# Gemini hands back every citation's URI as a vertexaisearch.cloud.google.com redirect and
+# puts the real publisher in a separate `domain` field, so the hostname path is the one the
+# provider actually exercises.
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["reuters.com", "www.reuters.com", "REUTERS.COM", "data.worldbank.org", "nasa.gov"],
+)
+def test_trusted_hostnames_pass(host: str) -> None:
+    assert is_trusted_domain(host)
+
+
+@pytest.mark.parametrize("host", ["example.com", "reuters.com.evil.example", "", None])
+def test_untrusted_hostnames_fail(host: str | None) -> None:
+    assert not is_trusted_domain(host)
+
+
+def test_the_redirect_host_itself_is_not_trusted() -> None:
+    """Filtering on the URI instead of the domain field would let every citation through."""
+    assert not is_trusted_domain("vertexaisearch.cloud.google.com")
