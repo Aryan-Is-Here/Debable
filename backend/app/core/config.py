@@ -64,7 +64,12 @@ class Settings(BaseSettings):
     # the only model whose Google Search grounding is free of charge. That amends a Phase 0
     # decision — see `docs/PROJECT-HANDBOOK.md` §6.
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    # 2.5-flash returns 404 "no longer available to new users"; 3.6-flash is verified working
+    # on a free key for plain generation, which is all this needs — search is ours.
+    gemini_model: str = "gemini-3.6-flash"
+    # Optional. Without it the fact-check searches Wikipedia, which needs no credentials.
+    # With it, evidence comes from the whole trusted-source allowlist, enforced at retrieval.
+    tavily_api_key: str = ""
     fact_check_timeout_seconds: float = 45.0
     # Per room, per hour. Stops one debate spamming the button.
     fact_check_rate_limit_per_hour: int = 10

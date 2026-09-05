@@ -61,6 +61,13 @@ TRUSTED_SOURCE_DOMAINS: Final[tuple[str, ...]] = (
     "un.org",
     "iea.org",
     "ipcc.ch",
+    # Tertiary, and included deliberately. Wikipedia was left off this list at first, on the
+    # reasoning that an encyclopedia is not a primary source. That was the wrong test: the
+    # question is whether a debater can check the citation in one click and see where it
+    # leads, and Wikipedia is both checkable and the thing a person would actually look at
+    # first. It is also the retrieval backend when no Tavily key is configured, so excluding
+    # it silently downgraded every verdict to `unverified` — found by running a real check.
+    "wikipedia.org",
 )
 
 # Suffixes accepted wholesale. Government and academic domains are numerous enough that

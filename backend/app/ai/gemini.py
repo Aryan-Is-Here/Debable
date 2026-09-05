@@ -1,154 +1,187 @@
-"""Gemini fact-check provider.
+"""Gemini fact-check provider: judges a claim against evidence we retrieved ourselves.
 
-**Why Gemini 2.5 Flash and not something newer.** It is the only model whose Google Search
-grounding is free of charge (500 grounded requests/day). Every Gemini 3.x model lists
-grounding as unavailable on the free tier. The project has no budget, so the model is a
-constraint, not a preference.
+**Why the model does not do its own searching.** It cannot, for free. Verified against the
+live API rather than the docs:
 
-**Why the response is parsed from text rather than a JSON schema.** Gemini only supports
-structured output *together with* the search tool from 3.x onwards; on 2.5 the pair is
-rejected with a 400, and the documented workaround — one grounded call to research, a second
-unrounded call to reformat — doubles the request count. On a 250/day budget that halves the
-number of fact-checks the product can perform, to buy formatting convenience. So this makes
-one grounded call and parses a deliberately small output contract.
+* ``gemini-2.5-flash`` — the only model with a free grounding quota on the pricing page —
+  returns ``404: no longer available to new users``.
+* ``gemini-3.6-flash`` with the ``google_search`` tool returns ``429 RESOURCE_EXHAUSTED`` on
+  the *first* call, before any successful generation. That is a zero quota, matching the
+  pricing page's "Grounding: Not available" on every 3.x Free Tier row.
+* Plain generation on the same models works fine.
 
-**Where the citations come from.** Not the model's prose — from ``grounding_metadata``,
-which lists what the search actually retrieved. A URL the model wrote could be invented; a
-grounding chunk cannot be. That inverts the usual hallucinated-citation risk for free.
+Being forced to retrieve separately made the design better in two ways. The allowlist is now
+enforced when searching (``app/search/``) instead of filtering citations afterwards, so an
+untrusted page is never read. And with no tool in the request, **structured output works** —
+Gemini only allows schemas alongside built-in tools from 3.x, and only on paid grounding — so
+the verdict is parsed from JSON rather than scraped out of prose.
 
-One consequence worth knowing: those chunk URIs are ``vertexaisearch.cloud.google.com``
-redirect links rather than publisher URLs. They resolve when clicked, but the trust decision
-has to be made on the separate ``domain`` field — see ``app/core/sources.py``.
+Citations cannot be invented: the model selects from the numbered sources it was given by
+index, and anything outside that range is discarded.
 """
 
 import asyncio
+import json
 import logging
-import re
 
 from google import genai
 from google.genai import types
 
 from app.ai.base import FactCheckProvider, FactCheckUnavailable, ProviderResult, ProviderSource
 from app.models.fact_check import FactCheckVerdict
+from app.search.base import SearchBackend, SearchResult
 
 logger = logging.getLogger(__name__)
 
-# The output contract. Small on purpose: every additional required field is another way for
-# a parse to fail, and a failed parse costs a request from a daily budget.
-_PROMPT = """\
-You are fact-checking a single claim made during a live debate. Search for evidence, then \
-answer in exactly this format and nothing else:
+# Truncated so one long article cannot crowd the others out of the prompt.
+MAX_SOURCE_CHARS = 1500
 
-VERDICT: <one of: true, false, misleading, unverified>
-EXPLANATION: <two or three sentences, plain language, no markdown>
+_SYSTEM = """\
+You are fact-checking a single claim made during a live debate. Judge it ONLY against the \
+numbered sources provided — you may not rely on anything else you know, because the debaters \
+can only check what is cited.
 
-Use `misleading` when the claim is technically accurate but omits context that changes its \
-meaning. Use `unverified` when your search does not settle it — that is a legitimate answer \
-and is much better than guessing. Do not hedge in the verdict line; put every qualification \
-in the explanation.
+Verdicts:
+- true: the sources support the claim.
+- false: the sources contradict it.
+- misleading: technically accurate but omitting context that changes its meaning.
+- unverified: the sources do not settle it. This is a legitimate and useful answer. Prefer it \
+over guessing — a confident wrong verdict in a live argument is far worse than an honest \
+"cannot tell".
 
-Claim: {claim}"""
+In source_indices, list the numbers of the sources that actually support your verdict. Leave \
+it empty if none do. Write the explanation in two or three plain sentences, no markdown."""
 
-_VERDICT_PATTERN = re.compile(r"^\s*VERDICT:\s*([a-z]+)", re.IGNORECASE | re.MULTILINE)
-_EXPLANATION_PATTERN = re.compile(
-    r"^\s*EXPLANATION:\s*(.+)", re.IGNORECASE | re.MULTILINE | re.DOTALL
-)
-
-_VERDICTS: dict[str, FactCheckVerdict] = {v.value: v for v in FactCheckVerdict}
+_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdict": {
+            "type": "string",
+            "enum": [verdict.value for verdict in FactCheckVerdict],
+        },
+        "explanation": {"type": "string"},
+        "source_indices": {"type": "array", "items": {"type": "integer"}},
+    },
+    "required": ["verdict", "explanation", "source_indices"],
+}
 
 
 class GeminiFactCheckProvider(FactCheckProvider):
-    """Checks a claim with Gemini, grounded in Google Search."""
+    """Retrieves evidence, then asks Gemini to judge the claim against it."""
 
-    def __init__(self, *, api_key: str, model: str, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        search: SearchBackend,
+        timeout_seconds: float,
+    ) -> None:
         self._client = genai.Client(api_key=api_key)
         self._model = model
+        self._search = search
         self._timeout = timeout_seconds
 
     async def check(self, claim: str) -> ProviderResult:
+        cleaned = claim.strip()
+
+        # Raises SearchUnavailable if the search itself failed — which is "never checked",
+        # not "checked and unresolved", and so must not reach the model or the database.
+        results = await self._search.search(cleaned)
+
+        if not results:
+            # An honest verdict: we looked in the trusted sources and found nothing. This is
+            # the one place an empty answer is legitimately `unverified` rather than an error.
+            return ProviderResult(
+                verdict=FactCheckVerdict.UNVERIFIED,
+                explanation=(
+                    "No trusted source discussing this claim could be found, so it could not "
+                    "be confirmed or refuted."
+                ),
+                sources=[],
+            )
+
+        payload = await self._judge(cleaned, results)
+        return _to_provider_result(payload, results)
+
+    async def _judge(self, claim: str, results: list[SearchResult]) -> dict:
+        prompt = _build_prompt(claim, results)
         try:
             response = await asyncio.wait_for(
                 self._client.aio.models.generate_content(
                     model=self._model,
-                    contents=_PROMPT.format(claim=claim.strip()),
+                    contents=prompt,
                     config=types.GenerateContentConfig(
-                        tools=[types.Tool(google_search=types.GoogleSearch())],
-                        # Low temperature: a fact-check should give the same answer twice.
+                        system_instruction=_SYSTEM,
+                        response_mime_type="application/json",
+                        response_schema=_RESPONSE_SCHEMA,
+                        # A fact-check should give the same answer to the same evidence twice.
                         temperature=0.0,
                     ),
                 ),
                 timeout=self._timeout,
             )
         except TimeoutError:
-            # Not retried here — the caller owns the budget. See FactCheckProvider.
             logger.warning("Fact-check timed out", extra={"timeout": self._timeout})
             raise FactCheckUnavailable("The fact-check timed out. Try again shortly.") from None
-        except Exception as exc:
-            # Covers an exhausted daily quota (429) as well as transport failures. Both mean
-            # the claim was not checked, which is emphatically not the same as `unverified`.
+        except Exception as exc:  # noqa: BLE001 - quota, transport and API errors alike
             logger.warning("Fact-check request failed", exc_info=exc)
             raise FactCheckUnavailable() from exc
 
-        return self._to_result(response)
-
-    def _to_result(self, response: object) -> ProviderResult:
         text = getattr(response, "text", None)
         if not text:
             raise FactCheckUnavailable("The fact-check service returned an empty response.")
 
-        verdict_match = _VERDICT_PATTERN.search(text)
-        verdict = _VERDICTS.get(verdict_match.group(1).lower()) if verdict_match else None
-        if verdict is None:
+        try:
+            payload = json.loads(text)
+        except ValueError as exc:
             # We cannot read the answer, so we do not have one. Recording `unverified` here
             # would persist a claim that was never actually resolved.
             logger.warning("Unparseable fact-check response", extra={"response": text[:200]})
+            raise FactCheckUnavailable(
+                "The fact-check service returned an unreadable answer."
+            ) from exc
+
+        if not isinstance(payload, dict):
             raise FactCheckUnavailable("The fact-check service returned an unreadable answer.")
-
-        explanation_match = _EXPLANATION_PATTERN.search(text)
-        explanation = (
-            explanation_match.group(1).strip()
-            if explanation_match
-            # The verdict is the load-bearing part; a missing explanation is a cosmetic
-            # loss and not worth discarding a request from the daily budget over.
-            else "No explanation was provided."
-        )
-
-        return ProviderResult(
-            verdict=verdict,
-            explanation=explanation,
-            sources=_extract_sources(response),
-        )
+        return payload
 
 
-def _extract_sources(response: object) -> list[ProviderSource]:
-    """Citations from grounding metadata — what search retrieved, not what the model wrote.
+def _build_prompt(claim: str, results: list[SearchResult]) -> str:
+    """Number the sources so the model can cite them by index instead of writing URLs."""
+    blocks = [
+        f"[{index}] {result.title}\n{result.content[:MAX_SOURCE_CHARS]}"
+        for index, result in enumerate(results, start=1)
+    ]
+    sources = "\n\n".join(blocks)
+    return f"Claim: {claim}\n\nSources:\n\n{sources}"
 
-    Deliberately tolerant: this walks an SDK response shape that is outside our control, and
-    losing the citations is worth far less than losing the verdict. Filtering to trusted
-    domains happens in the service layer, in one place, so it can be tested without a model.
-    """
-    candidates = getattr(response, "candidates", None) or []
-    if not candidates:
-        return []
-    metadata = getattr(candidates[0], "grounding_metadata", None)
-    chunks = getattr(metadata, "grounding_chunks", None) or []
 
+def _to_provider_result(payload: dict, results: list[SearchResult]) -> ProviderResult:
+    """Map the model's JSON onto a result, resolving cited indices to real sources."""
+    raw_verdict = payload.get("verdict")
+    try:
+        verdict = FactCheckVerdict(raw_verdict)
+    except ValueError:
+        logger.warning("Unknown verdict from fact-check", extra={"verdict": raw_verdict})
+        raise FactCheckUnavailable(
+            "The fact-check service returned an unrecognised verdict."
+        ) from None
+
+    explanation = str(payload.get("explanation") or "").strip() or "No explanation was provided."
+
+    # Indices are 1-based in the prompt. Anything out of range is dropped rather than
+    # guessed at — this is what makes an invented citation impossible rather than unlikely.
     sources: list[ProviderSource] = []
-    seen: set[str] = set()
-    for chunk in chunks:
-        web = getattr(chunk, "web", None)
-        if web is None:
+    seen: set[int] = set()
+    for index in payload.get("source_indices") or []:
+        if not isinstance(index, int) or index in seen:
             continue
-        uri = getattr(web, "uri", None)
-        if not uri or uri in seen:
-            continue
-        seen.add(uri)
-        sources.append(
-            ProviderSource(
-                title=getattr(web, "title", None) or getattr(web, "domain", None) or "Source",
-                url=uri,
-                # The publisher, carried separately because `uri` is a redirect link.
-                domain=getattr(web, "domain", None),
-            )
-        )
-    return sources
+        seen.add(index)
+        if 1 <= index <= len(results):
+            result = results[index - 1]
+            sources.append(ProviderSource(title=result.title, url=result.url))
+        else:
+            logger.info("Discarding an out-of-range source index", extra={"index": index})
+
+    return ProviderResult(verdict=verdict, explanation=explanation, sources=sources)

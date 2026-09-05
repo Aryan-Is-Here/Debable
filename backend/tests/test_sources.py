@@ -56,11 +56,21 @@ def test_government_and_academic_suffixes_are_trusted(url: str) -> None:
     [
         "https://someblog.example.com/post",
         "https://medium.com/@someone/why-i-am-right",
-        "https://en.wikipedia.org/wiki/Fact",
+        "https://substack.com/p/my-take",
     ],
 )
 def test_unlisted_domains_are_not_trusted(url: str) -> None:
     assert not is_trusted_source(url)
+
+
+def test_wikipedia_is_trusted() -> None:
+    """It is the retrieval backend when no Tavily key is set.
+
+    Excluding it — the original call, on the grounds that an encyclopedia is not a primary
+    source — meant every Wikipedia-backed verdict was stripped of its citations and silently
+    downgraded to `unverified`. Regression test for a real bug.
+    """
+    assert is_trusted_source("https://en.wikipedia.org/wiki/Great_Depression")
 
 
 @pytest.mark.parametrize(
