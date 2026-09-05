@@ -20,20 +20,37 @@ import {
   FieldError,
   FieldLabel,
 } from "@/components/ui/field";
-
-/** Claim length bounds — mirrored from the backend contract in later phases. */
-const MIN_CLAIM_LENGTH = 10;
-const MAX_CLAIM_LENGTH = 300;
+import { ApiError } from "@/services/api-client";
+import { MAX_CLAIM_LENGTH, MIN_CLAIM_LENGTH } from "@/services/fact-check";
 
 interface FactCheckDialogProps {
-  /** Called with the validated claim; resolves when the (mock) check is done. */
+  /** Called with the validated claim; resolves when the check is done. */
   onSubmitClaim: (claim: string) => Promise<void>;
 }
 
 /**
- * On-demand fact-check entry point (docs/10-ai-fact-check-design.md): the user
- * submits one specific claim; the result arrives in the debate chat. Phase 1
- * resolves against a mock generator instead of the AI service.
+ * Turn a failed request into something honest.
+ *
+ * The distinction being preserved is the one the whole feature rests on: a refusal is not a
+ * verdict. "We could not check this" and "we checked and could not settle it" must never
+ * read the same way, or the user learns to treat an outage as evidence.
+ */
+function describeFailure(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 429) return error.message;
+    if (error.status === 409) return "This debate has ended.";
+    if (error.status === 503) {
+      return "Couldn't check that claim right now — this isn't a verdict on it. Try again shortly.";
+    }
+    return error.message;
+  }
+  return "Couldn't reach the fact-check service. Try again shortly.";
+}
+
+/**
+ * On-demand fact-check entry point (docs/10-ai-fact-check-design.md): the user submits one
+ * specific claim, and the verdict arrives in the debate chat for *both* debaters — pushed
+ * over the chat socket rather than returned only to whoever asked.
  */
 export function FactCheckDialog({ onSubmitClaim }: FactCheckDialogProps) {
   const [open, setOpen] = useState(false);
@@ -58,6 +75,10 @@ export function FactCheckDialog({ onSubmitClaim }: FactCheckDialogProps) {
       await onSubmitClaim(trimmed);
       setClaim("");
       setOpen(false);
+    } catch (failure) {
+      // Deliberately keeps the dialog open: the claim is still in the box, so a rate limit
+      // or an outage costs the user a retry rather than retyping.
+      setError(describeFailure(failure));
     } finally {
       setSubmitting(false);
     }
@@ -73,8 +94,8 @@ export function FactCheckDialog({ onSubmitClaim }: FactCheckDialogProps) {
         <DialogHeader>
           <DialogTitle>Request a fact-check</DialogTitle>
           <DialogDescription>
-            Submit one specific claim. The AI verifies it against trusted
-            sources and posts the result in the chat for both debaters.
+            Submit one specific claim. It is checked against trusted sources
+            only, and the verdict is posted in the chat for both debaters.
           </DialogDescription>
         </DialogHeader>
 

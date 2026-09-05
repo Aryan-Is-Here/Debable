@@ -12,6 +12,7 @@
 
 import type { ChatMessage, ID } from "@/lib/types";
 import { API_BASE_URL, apiRequest } from "@/services/api-client";
+import type { WireFactCheck } from "@/services/fact-check";
 
 /** A message exactly as the backend stores and sends it. */
 export interface WireMessage {
@@ -30,6 +31,9 @@ interface MessageListResponse {
 export type ServerFrame =
   | { type: "ready"; roomId: ID; userId: ID }
   | { type: "message"; message: WireMessage }
+  // A verdict, pushed to both debaters. Its own frame rather than a message because
+  // `messages.sender_id` is NOT NULL — a system-authored row has no author to point at.
+  | { type: "fact_check"; factCheck: WireFactCheck }
   | { type: "error"; code: string; message: string };
 
 /** Frames the client sends. */
