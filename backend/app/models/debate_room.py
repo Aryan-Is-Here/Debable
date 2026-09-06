@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from app.models.fact_check import FactCheck
     from app.models.message import Message
     from app.models.rating import Rating
+    from app.models.report import Report
     from app.models.topic import Topic
     from app.models.user import User
 
@@ -60,6 +61,9 @@ class DebateRoom(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="room", cascade="all, delete-orphan"
     )
     ratings: Mapped[list["Rating"]] = relationship(
+        back_populates="room", cascade="all, delete-orphan"
+    )
+    reports: Mapped[list["Report"]] = relationship(
         back_populates="room", cascade="all, delete-orphan"
     )
 

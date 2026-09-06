@@ -9,6 +9,7 @@ from app.models.fact_check import FactCheck, FactCheckVerdict
 from app.models.match_queue import MatchQueueEntry
 from app.models.message import Message
 from app.models.rating import Rating
+from app.models.report import Report
 from app.models.topic import Topic, TopicStatus
 from app.models.user import User
 
@@ -19,6 +20,7 @@ __all__ = [
     "MatchQueueEntry",
     "Message",
     "Rating",
+    "Report",
     "Topic",
     "TopicStatus",
     "User",
