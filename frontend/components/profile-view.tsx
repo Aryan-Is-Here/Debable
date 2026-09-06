@@ -1,8 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { SignInButton, useAuth } from "@clerk/nextjs";
-import { AlertCircle, CalendarDays, Loader2, MessagesSquare, Star } from "lucide-react";
+import {
+  AlertCircle,
+  CalendarDays,
+  ChevronRight,
+  Loader2,
+  MessagesSquare,
+  Star,
+} from "lucide-react";
 
 import { AUTH_STALLED_HINT, useAuthReady } from "@/hooks/use-auth-ready";
 import { initials } from "@/lib/utils";
@@ -148,8 +156,18 @@ export function ProfileView() {
         {data.history.length > 0 ? (
           <Card className="mt-4">
             <CardContent className="divide-y divide-border p-0">
+              {/*
+                Each row links to that debate's results page. Without this the page is
+                reachable only by the one-time redirect after ending a debate, so a rating
+                you already gave — and, worse, a debate you have not rated yet — could only
+                be found by assembling the URL by hand.
+              */}
               {data.history.map((entry) => (
-                <div key={entry.id} className="flex items-center gap-3 px-4 py-3">
+                <Link
+                  key={entry.id}
+                  href={`/debate/${entry.id}/results`}
+                  className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none"
+                >
                   <Avatar className="size-8">
                     {entry.opponent.avatarUrl && (
                       <AvatarImage src={entry.opponent.avatarUrl} alt="" />
@@ -165,6 +183,11 @@ export function ProfileView() {
                       {historyDateFormatter.format(new Date(entry.date))}
                     </p>
                   </div>
+                  {/*
+                    The badge shows the rating this user *received*. "Not rated" therefore
+                    means the opponent never rated them — it does not say whether this user
+                    left a rating, which is what the linked page resolves.
+                  */}
                   {entry.ratingReceived !== null ? (
                     <Badge variant="secondary" className="gap-1">
                       <Star className="size-3 fill-amber-400 text-amber-400" />
@@ -173,7 +196,8 @@ export function ProfileView() {
                   ) : (
                     <Badge variant="outline">Not rated</Badge>
                   )}
-                </div>
+                  <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                </Link>
               ))}
             </CardContent>
           </Card>
