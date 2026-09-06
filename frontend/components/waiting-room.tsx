@@ -9,6 +9,7 @@ import { AlertCircle, Loader2, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { AUTH_STALLED_HINT, useAuthReady } from "@/hooks/use-auth-ready";
 import { initials } from "@/lib/utils";
 import { ApiError } from "@/services/api-client";
 import { getMatchState, joinQueue, leaveQueue, matchKeys } from "@/services/match";
@@ -34,7 +35,8 @@ interface WaitingRoomProps {
 export function WaitingRoom({ topicId }: WaitingRoomProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { getToken } = useAuth();
+  const { isLoaded, isSignedIn, signedIn, stalled } = useAuthReady();
   const [now, setNow] = useState(() => Date.now());
   // Guards the one-shot join. A ref rather than state because it must not cause a render,
   // and it is only ever read inside effects.
@@ -43,7 +45,6 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
   const shouldDequeue = useRef(false);
   const rejoinAttempts = useRef(0);
 
-  const signedIn = isLoaded && isSignedIn === true;
 
   const {
     mutate: requestJoin,
@@ -164,6 +165,22 @@ export function WaitingRoom({ topicId }: WaitingRoomProps) {
     await leaveQueue(await getToken()).catch(() => undefined);
     queryClient.removeQueries({ queryKey: matchKeys.state });
     router.push("/browse");
+  }
+
+  // Before the signed-out check, because when Clerk never loads `isLoaded` stays false and
+  // neither that branch nor this screen's spinner ever resolves — which is exactly the
+  // eternal-spinner failure this guards against.
+  if (stalled) {
+    return (
+      <Centered>
+        <AlertCircle className="size-8 text-destructive" />
+        <p className="font-medium">Sign-in isn&apos;t loading</p>
+        <p className="text-sm text-muted-foreground">{AUTH_STALLED_HINT}</p>
+        <Button variant="outline" onClick={() => window.location.reload()}>
+          Reload
+        </Button>
+      </Centered>
+    );
   }
 
   if (isLoaded && !isSignedIn) {

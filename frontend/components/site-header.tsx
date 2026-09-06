@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { MessagesSquare, Settings, User } from "lucide-react";
-import { SignInButton, SignUpButton, UserButton, useAuth } from "@clerk/nextjs";
+import { SignInButton, SignUpButton, UserButton } from "@clerk/nextjs";
 
+import { useAuthReady } from "@/hooks/use-auth-ready";
 import { cn } from "@/lib/utils";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -18,7 +19,7 @@ const navItems = [
 
 export function SiteHeader() {
   const pathname = usePathname();
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, stalled } = useAuthReady();
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-border bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -54,8 +55,15 @@ export function SiteHeader() {
 
         <div className="ml-auto flex items-center gap-2">
           <ThemeToggle />
-          {/* Reserve the slot until Clerk has loaded, so the header doesn't jump. */}
-          {!isLoaded ? (
+          {/* Reserve the slot until Clerk has loaded, so the header doesn't jump — but not
+              forever. If Clerk never loads, an invisible box leaves the header with no
+              avatar *and* no sign-in button, which reads as a broken page rather than a
+              configuration problem. */}
+          {stalled ? (
+            <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+              Retry sign-in
+            </Button>
+          ) : !isLoaded ? (
             <div className="size-8" aria-hidden />
           ) : isSignedIn ? (
             <UserButton appearance={{ elements: { avatarBox: "size-8" } }}>
