@@ -1,6 +1,6 @@
 # Debable — Handoff
 
-**Written:** 2026-08-14 · **Updated:** 2026-08-17 · **Branch:** `main` · **Working tree:** clean
+**Written:** 2026-08-14 · **Updated:** 2026-09-06 · **Branch:** `main` · **Working tree:** clean
 
 Read this first if you are picking the project up mid-flight. For the full reference see
 [`docs/PROJECT-HANDBOOK.md`](docs/PROJECT-HANDBOOK.md); for the narrative and every decision's

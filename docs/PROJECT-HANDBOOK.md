@@ -1,6 +1,6 @@
 # Debable — Complete Project Handbook
 
-**Generated:** 2026-07-18 · **Last updated:** 2026-08-17 · **Project state:** Phases 1–7 complete, Phase 8 next
+**Generated:** 2026-07-18 · **Last updated:** 2026-09-06 · **Project state:** Phases 1–7 complete, Phase 8 next
 **Repository:** https://github.com/Aryan-Is-Here/Debable
 **Local path:** `E:\Projects\Debable`
 
