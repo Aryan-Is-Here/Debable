@@ -94,5 +94,20 @@ async def get_current_user(
     return await resolve_user(db, claims)
 
 
+async def get_optional_user(
+    claims: Annotated[ClerkUser | None, Depends(get_optional_claims)],
+    db: DbSession,
+) -> User | None:
+    """The caller if signed in, otherwise ``None``.
+
+    For endpoints that serve anonymous callers but offer more to a known one — browsing
+    topics works signed out, but "only mine" needs to know who "mine" is.
+    """
+    if claims is None:
+        return None
+    return await resolve_user(db, claims)
+
+
 CurrentClaims = Annotated[ClerkUser, Depends(get_current_claims)]
 CurrentUser = Annotated[User, Depends(get_current_user)]
+OptionalUser = Annotated[User | None, Depends(get_optional_user)]

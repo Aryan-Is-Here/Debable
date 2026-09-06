@@ -126,7 +126,7 @@ A message sent in one window appears in the other **without a refresh**, and rel
 window still shows the full history. Fixtures pass the first half of that test and fail the
 second.
 
-### Decisions taken, 2026-08-17
+### Decisions taken, 2026-09-05
 
 All three questions above were settled before any code was written, and the transport
 resolution was confirmed as proposed.

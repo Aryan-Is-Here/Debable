@@ -20,6 +20,8 @@ export interface ListTopicsParams {
   search?: string;
   category?: string;
   status?: TopicStatus;
+  /** `1` to list only the signed-in caller's own topics. Requires a token. */
+  mine?: 1;
   limit?: number;
   offset?: number;
   /** Index signature so these can be passed straight through as query parameters. */
@@ -34,7 +36,10 @@ export interface CreateTopicPayload {
 
 export async function listTopics(
   params: ListTopicsParams = {},
-  options: Pick<RequestOptions, "signal" | "next" | "cache"> = {},
+  // `token` is optional because browsing works signed out — it is only needed for
+  // `mine=true`, which the server answers with an empty page for an anonymous caller
+  // rather than silently ignoring the filter and showing a stranger's topics.
+  options: Pick<RequestOptions, "signal" | "next" | "cache" | "token"> = {},
 ): Promise<Page<Topic>> {
   return apiRequest<Page<Topic>>("/topics", { params, ...options });
 }

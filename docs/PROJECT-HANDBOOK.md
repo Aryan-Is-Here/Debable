@@ -1,6 +1,6 @@
 # Debable — Complete Project Handbook
 
-**Generated:** 2026-07-18 · **Last updated:** 2026-08-17 · **Project state:** Phases 1–7 complete, Phase 8 next
+**Generated:** 2026-07-18 · **Last updated:** 2026-09-06 · **Project state:** Phases 1–8 complete, Phase 9 next
 **Repository:** https://github.com/Aryan-Is-Here/Debable
 **Local path:** `E:\Projects\Debable`
 
@@ -55,14 +55,14 @@ E:\Projects\Debable          (git repo, remote: Aryan-Is-Here/Debable)
 │   ├── 01…12-*.md           PRD, architecture, DB, API, UI, roadmap, etc.
 │   ├── 13-prompts/          Per-area prompt templates
 │   └── progress/            Dated progress reports (one per phase start)
-├── frontend/                Next.js app — live against the API (no mock data left in the debate loop)
+├── frontend/                Next.js app — entirely server data, no mock fixtures remain
 │   ├── app/                 Routes (see §4)
 │   ├── components/          Feature components + components/ui/ (shadcn)
 │   ├── hooks/               use-debate-chat, use-auth-ready
-│   ├── lib/                 types.ts, utils.ts, mock/, validation/
-│   ├── services/            API clients: api-client, topics, match, video, chat, fact-check
+│   ├── lib/                 types.ts, utils.ts, validation/  (mock/ deleted in Phase 8)
+│   ├── services/            API clients: api-client, topics, match, video, chat, fact-check, ratings
 │   └── styles/              (empty — globals live in app/globals.css)
-├── backend/                 FastAPI service — Phases 2-7 complete
+├── backend/                 FastAPI service — Phases 2-8 complete
 │   ├── app/
 │   │   ├── main.py          App factory: CORS, lifespan, exception handlers
 │   │   ├── __main__.py      Dev entrypoint (`python -m app`) — see §5.11
@@ -72,12 +72,12 @@ E:\Projects\Debable          (git repo, remote: Aryan-Is-Here/Debable)
 │   │   ├── schemas/         health, topic, match, video, user, common (camelCase out)
 │   │   ├── auth/            clerk.py, jwks.py, dependencies.py
 │   │   ├── api/v1/          router, health, topics, match (incl. video token)
-│   │   ├── services/        topic, match, video, chat, fact_check
-│   │   ├── repositories/    topic, match, message, fact_check
+│   │   ├── services/        topic, match, video, chat, fact_check, rating
+│   │   ├── repositories/    topic, match, message, fact_check, rating
 │   │   ├── websocket/       registry, auth, protocol (Phase 6)
 │   │   ├── ai/              base, gemini, stub, factory (Phase 7)
 │   │   └── search/          base, tavily, wikipedia (Phase 7)
-│   ├── tests/               216 tests; most need Postgres and SKIP without it
+│   ├── tests/               242 tests; most need Postgres and SKIP without it
 │   ├── migrations/          Alembic env + 4 revisions (0001-0004)
 │   ├── pyproject.toml       uv-managed deps, ruff + pytest config
 │   ├── alembic.ini
@@ -90,7 +90,7 @@ E:\Projects\Debable          (git repo, remote: Aryan-Is-Here/Debable)
 
 ---
 
-## 4. Everything built so far (Phases 0–7)
+## 4. Everything built so far (Phases 0–8)
 
 ### Phase 0 — Planning ✅
 Repo scaffolded to the blueprint structure; blueprint extracted into `docs/`; git + GitHub wired; root `.gitignore` (Node+Python+env) and README. Opinionated configs (linters, CI, Docker) deliberately deferred to their phases.
@@ -231,6 +231,14 @@ inside the built `api` image.
     is wrong. Use `useAuthReady` from `frontend/hooks/use-auth-ready.ts`, which adds
     `stalled`. Its `stalled` is **derived** (`!isLoaded && timedOut`) rather than reset in an
     effect — clearing it there is a synchronous setState in an effect body (§5.3).
+28. **⚠️ A passing test cannot tell you whether anything *reaches* the code.** This project
+    has now shipped working, tested code that nothing led to **twice**. Phase 5's opponent
+    mute indicator rendered correctly and was never passed its prop. Phase 8's results page
+    worked perfectly and was reachable only by a one-time redirect, so a debate you skipped
+    rating was stranded permanently — every test passed, because tests address the URL
+    directly. **When you finish a feature, ask what in the UI navigates to it**, and if the
+    answer is "the redirect that happens once", that is the bug. Both cases were found by a
+    person using the product, not by the suite.
 
 ### How to run the frontend
 ```bash
@@ -250,7 +258,7 @@ cp .env.example .env      # first time only
 uv sync                   # first time only
 uv run alembic upgrade head
 uv run python -m app      # http://localhost:8000 — docs at /docs
-uv run pytest             # 216 tests; most SKIP without Postgres — always check the skip count
+uv run pytest             # 242 tests; most SKIP without Postgres — always check the skip count
 ```
 Whole stack in containers instead: `docker compose -f docker/docker-compose.yml up -d --build`.
 
@@ -408,48 +416,92 @@ citing real articles. Confirmed by hand in two windows.
 
 ---
 
-## 7. How to continue — Phase 8 in extreme detail
+### Phase 8 — Ratings ✅ (branch `feature/ratings`)
 
-**Goal:** Ratings. The last mock data in the product, and the instrument that records
-whether a debate went well.
+The last mock data in the product.
 
-**Branch:** `feature/ratings`
+| Area | What exists |
+|---|---|
+| Endpoints | `POST`/`GET /rooms/{id}/rating`, `GET /profile`, and `GET /topics?mine=true` |
+| Rules | Participant-only (`to_room_read`), finished debates only, one rating per reviewer per room |
+| Uniqueness | Enforced by the database constraint and translated to a 409 — **not** re-checked first |
+| Profile | Real debate count, average rating and history. `averageRating` is `null` until somebody rates you |
+| Tests | 26 new (242 total, 0 skipped) |
 
-### What is already in place
-The schema does most of the work. `app/models/rating.py` already carries a `UniqueConstraint`
-on `(room_id, reviewer_id)`, a `CheckConstraint` for the 1–5 range, and another forbidding
-self-review. So the service translates an `IntegrityError` into a clean 409 rather than
-re-checking — the same shape `match.join` already uses. `RatingForm` exists and has been
-rendering since Phase 1.
+**Why uniqueness is not checked before inserting.** A "have they rated?" read followed by an
+insert is a *longer* race than the insert alone: two submissions milliseconds apart both read
+"no" and both proceed. Letting the `UniqueConstraint` fire and translating `IntegrityError`
+is the same shape `match.join` uses for the queue. A second attempt is refused rather than
+allowed to overwrite — an overwrite would let someone revise a score after seeing the reply,
+and would destroy the original silently.
 
-### The three remaining mock call-sites
-- `app/debate/[roomId]/results/page.tsx` — uses `mockDebateRoom` for **any** roomId, so
-  rating currently "works" while rating nothing. Load the real room via `getRoom`, exactly as
-  `components/debate-room-loader.tsx` does.
-- `app/profile/page.tsx` — `mockProfile`. Debates count and average rating become real.
-- `components/settings-view.tsx` — `currentUser`. Read from Clerk instead.
+**Three product decisions, taken deliberately:** rating stays skippable (a forced rating
+produces compliance, not signal); `averageRating` is `null` rather than a number before anyone
+has rated you (a 0 reads as terrible and a 5 is a lie); and `/profile` is the caller's own only
+(a public profile would expose who debated whom, and the MVP has no privacy controls).
 
-### Step-by-step
-1. `app/repositories/rating.py` and `app/services/rating.py`. Guard with `to_room_read()`
-   from `app/services/match.py`, as chat and fact-check both do.
-2. `POST /rooms/{id}/rating`.
-3. Wire `RatingForm`; load the real room on the results page.
-4. Real profile stats.
-5. Tests: a participant may rate once; a second attempt is 409; a non-participant is 403;
-   self-rating is refused; a score outside 1–5 is 422.
+**Two things found only by using it:**
 
-### A note on the project's goal
-`docs/01-product-vision.md` states the MVP success metric as *"two strangers can successfully
-debate and use AI fact-checking during the conversation"* — a **capability** metric, met by
-Phase 7. The handoff framing, *"can fact-checking improve debates?"*, is an **outcome**
-question that nothing currently measures.
+1. The results page rendered `mockDebateRoom` for *any* roomId. The form submitted, a toast
+   appeared, and nothing was written. It survived seven phases because it never looked broken.
+2. That page was reachable only by the one-time redirect after ending a debate — so a debate
+   you skipped rating was **stranded permanently**. Profile history rows now link to it. See
+   §5.28.
 
-Phase 8 does not have to answer it, and by decision it does not. But it should not foreclose
-it either: `ratings.room_id` and `fact_checks.room_id` join on the same room, so "debates
-with a fact-check versus without" stays a query rather than a migration. Keep it that way.
+**`frontend/lib/mock/` is deleted.** Every screen renders server data, and `lib/types.ts` —
+written in Phase 1 before any backend existed — never changed.
 
-### Phases 9–10 (summary map)
-- **Phase 9 Polish & Deploy:** resolve conflict #1 (Reports); `POST /report` + minimal UI; deploy per doc 09; a11y/dark-mode/QA pass.
+---
+
+## 7. How to continue — Phase 9 in extreme detail
+
+**Goal:** Reports, deployment, and a quality pass. The last substantive phase.
+
+**Branch:** `feature/polish`
+
+### Resolve conflict #1 — the only one left
+The PRD lists a Reports feature and `docs/05-api-specification.md` has `POST /report`, but
+`docs/04-database-design.md` has no table for it. Add one:
+`reports(id, room_id, reporter_id, reported_user_id, reason, created_at)`.
+
+**This is the only migration left in the project.** Everything since Phase 2 has fitted the
+original schema. Follow §5.17: name the constraint with the short form, then prove equivalence
+with `alembic check`.
+
+Then `POST /report` and a minimal UI — a menu item in the debate room. Scope it honestly:
+the MVP has no moderation queue, so a report is a *record*, not a workflow. Do not build an
+admin surface for it.
+
+### Deployment is research-first, not plan-first
+`docs/09-deployment.md` names Vercel, Railway/Fly.io, Neon/Supabase and LiveKit Cloud. Treat
+those as candidates, not decisions. **Two free tiers closed underneath this project during
+Phase 7 alone, and the published pricing pages were wrong about both** (§5.25). Verify each
+with a real signup at the time.
+
+Three specific constraints:
+
+1. **⚠️ Pin the API to one worker, or add a broker.** The chat connection registry is
+   per-process (§5.18), so two debaters served by different workers see none of each other's
+   messages. This is the single deployment decision most likely to be got wrong, because
+   everything looks fine with one user.
+2. **Create production Clerk and LiveKit instances.** The current ones are development
+   instances with usage limits and a browser warning, and the Clerk one is bound to
+   `localhost:3000` (§5.26).
+3. **`GEMINI_API_KEY` and `TAVILY_API_KEY` are optional.** A deployment without them still
+   runs the whole flow on stub verdicts — useful for a preview environment, and worth
+   confirming rather than assuming.
+
+### The quality pass
+Accessibility and dark mode across all nine routes; the empty and error states that only
+appear on a fresh account; and a read of every screen with no data in the database, which is
+what a new user actually sees.
+
+### Before you start
+Read §5.14–5.28. §5.28 in particular: this project has now shipped working code that nothing
+led to **twice**, and Phase 9 adds a report action that will have exactly the same failure
+mode if it is built without an entry point.
+
+### Phase 10 (summary)
 - **Phase 10 Professional UI/UX Redesign:** the full visual overhaul, deliberately last.
 
 Each phase: new branch, plan first, progress report at phase start, blueprint-conflict check, tests where appropriate, merge on green.
