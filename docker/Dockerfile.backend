@@ -22,4 +22,18 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/v1/health').status == 200 else 1)"
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# ⚠️ --workers 1 is mandatory, not a default worth "optimising".
+#
+# The chat connection registry in app/websocket/registry.py is per-process: it maps room ids
+# to open sockets in memory. With two workers, two debaters can be served by different
+# processes, and each broadcast reaches an empty set — so neither sees the other's messages.
+# Nothing errors, and it looks completely fine with a single user, which is what makes it
+# dangerous. Raising this number is a chat outage, not a throughput gain.
+#
+# Fixing it properly means a broker (Redis pub/sub, or Postgres LISTEN/NOTIFY) behind
+# registry.broadcast(). Until then, one worker. Messages are committed before they are
+# broadcast, so even then the failure mode would be "needs a reload", not "lost".
+#
+# `uvicorn` rather than `python -m app` is correct here: the ProactorEventLoop problem that
+# entrypoint exists for is Windows-only, and this image is Linux.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

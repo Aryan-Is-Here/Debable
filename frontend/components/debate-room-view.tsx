@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChatPanel } from "@/components/chat-panel";
 import { DebateVideo } from "@/components/debate-video";
+import { ReportDialog } from "@/components/report-dialog";
 
 interface DebateRoomViewProps {
   room: DebateRoom;
@@ -56,19 +57,27 @@ export function DebateRoomView({ room }: DebateRoomViewProps) {
           <Badge variant="outline">{room.topic.category}</Badge>
           <h1 className="truncate font-medium">{room.topic.title}</h1>
         </div>
-        <Button
-          variant="destructive"
-          size="sm"
-          disabled={isEnding}
-          onClick={() => endDebate()}
-        >
-          {isEnding ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <PhoneOff className="size-4" />
-          )}
-          End debate
-        </Button>
+        <div className="flex items-center gap-2">
+          {/*
+            Reachable during the debate, not only after it. A report action with no entry
+            point would be this project's third instance of shipping working code that
+            nothing navigates to — see PROJECT-HANDBOOK §5.28.
+          */}
+          <ReportDialog roomId={room.id} opponentName={room.opponent.username} />
+          <Button
+            variant="destructive"
+            size="sm"
+            disabled={isEnding}
+            onClick={() => endDebate()}
+          >
+            {isEnding ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <PhoneOff className="size-4" />
+            )}
+            End debate
+          </Button>
+        </div>
       </header>
 
       {/* Video + chat */}
