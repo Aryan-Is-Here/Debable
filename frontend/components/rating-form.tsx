@@ -2,11 +2,15 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@clerk/nextjs";
 import { Loader2, Star } from "lucide-react";
 import { toast } from "sonner";
 
 import type { DebateRoom } from "@/lib/types";
 import { cn, initials } from "@/lib/utils";
+import { ApiError } from "@/services/api-client";
+import { MAX_COMMENT_LENGTH, ratingKeys, submitRating } from "@/services/ratings";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -28,33 +32,53 @@ interface RatingFormProps {
   room: DebateRoom;
 }
 
-const MAX_COMMENT_LENGTH = 300;
-
 /**
- * Post-debate rating (1–5 stars + optional comment). Mock submit in Phase 1;
- * maps to the Ratings table (docs/04-database-design.md) in later phases.
+ * Post-debate rating: 1–5 stars and an optional comment, persisted to the `ratings` table.
+ *
+ * Skipping is deliberately allowed. A forced rating produces compliance rather than signal,
+ * and the profile's `averageRating` is nullable precisely so "nobody rated this yet" can be
+ * represented honestly.
  */
 export function RatingForm({ room }: RatingFormProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const { getToken } = useAuth();
   const [score, setScore] = useState(0);
   const [hovered, setHovered] = useState(0);
   const [comment, setComment] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
 
-  async function handleSubmit() {
+  const { mutate: send, isPending: submitting } = useMutation({
+    mutationFn: async () =>
+      submitRating(room.id, { score, comment: comment.trim() || undefined }, await getToken()),
+    onSuccess: () => {
+      // The results screen reads this to show "already rated" on a revisit.
+      queryClient.invalidateQueries({ queryKey: ratingKeys.state(room.id) });
+      toast.success("Rating submitted", {
+        description: `You rated ${room.opponent.username} ${score}/5.`,
+      });
+      router.push("/");
+    },
+    onError: (failure) => {
+      // A 409 means the debate was already rated, or has not ended. Both are worth saying
+      // precisely — "something went wrong" would send someone hunting for a bug.
+      if (failure instanceof ApiError && failure.status === 409) {
+        setError(failure.message);
+        return;
+      }
+      setError(
+        failure instanceof ApiError ? failure.message : "Couldn't submit that. Try again.",
+      );
+    },
+  });
+
+  function handleSubmit() {
     if (score < 1) {
       setError("Please choose a rating.");
       return;
     }
     setError(null);
-    setSubmitting(true);
-    // Mock submit — persistence arrives with the backend (Phase 8).
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    toast.success("Rating submitted", {
-      description: `You rated ${room.opponent.username} ${score}/5.`,
-    });
-    router.push("/");
+    send();
   }
 
   return (

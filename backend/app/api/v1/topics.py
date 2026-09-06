@@ -10,7 +10,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.dependencies import CurrentUser
+from app.auth.dependencies import CurrentUser, OptionalUser
 from app.core.categories import TOPIC_CATEGORIES
 from app.db.session import get_db
 from app.models.topic import TopicStatus
@@ -51,14 +51,33 @@ async def list_topics(
     status_filter: Annotated[
         TopicStatus | None, Query(alias="status", description="Lifecycle filter.")
     ] = None,
+    mine: Annotated[
+        bool,
+        Query(description="Only topics you created. Requires a signed-in caller."),
+    ] = False,
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
+    current_user: OptionalUser = None,
 ) -> Page[TopicRead]:
+    """Browse topics. Anonymous callers see everything except the `mine` filter.
+
+    `mine` exists so the profile screen can list what you created without a second endpoint
+    that would duplicate this one's paging and filtering. A `mine=true` from an anonymous
+    caller returns nothing rather than everything — silently ignoring the filter would show a
+    stranger's topics under "Topics created".
+    """
+    creator_id = None
+    if mine:
+        if current_user is None:
+            return Page[TopicRead](items=[], total=0, limit=limit, offset=offset)
+        creator_id = current_user.id
+
     return await topic_service.list_topics(
         db,
         search=search,
         category=category,
         status=status_filter,
+        creator_id=creator_id,
         limit=limit,
         offset=offset,
     )

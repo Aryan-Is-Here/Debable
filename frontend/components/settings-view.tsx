@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useSyncExternalStore } from "react";
+import { useUser } from "@clerk/nextjs";
 import { useTheme } from "next-themes";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { toast } from "sonner";
 
-import { currentUser } from "@/lib/mock/debate";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,6 +35,11 @@ const themeOptions = [
  */
 export function SettingsView() {
   const { theme, setTheme } = useTheme();
+  const { user } = useUser();
+  // Em dashes rather than empty inputs while Clerk loads: a blank field reads as "you have
+  // no username", which is a different and wrong statement.
+  const username = user?.username ?? user?.firstName ?? "—";
+  const email = user?.primaryEmailAddress?.emailAddress ?? "—";
   // Theme is unknown until hydration; treat server render as "not mounted" so
   // the selected state only appears client-side (avoids a hydration mismatch).
   const mounted = useSyncExternalStore(
@@ -86,18 +91,19 @@ export function SettingsView() {
         <CardHeader>
           <CardTitle>Account</CardTitle>
           <CardDescription>
-            Profile identity. Editing unlocks once sign-in (Clerk) arrives in
-            Phase 2.
+            Read-only here: Clerk owns your identity, so changes are made in its
+            account dialog rather than duplicated in a form that could disagree
+            with it.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <Field>
             <FieldLabel htmlFor="username">Username</FieldLabel>
-            <Input id="username" value={currentUser.username} disabled />
+            <Input id="username" value={username} disabled />
           </Field>
           <Field>
             <FieldLabel htmlFor="email">Email</FieldLabel>
-            <Input id="email" value="ava@example.com" disabled />
+            <Input id="email" value={email} disabled />
             <FieldDescription>
               Managed by your sign-in provider.
             </FieldDescription>
