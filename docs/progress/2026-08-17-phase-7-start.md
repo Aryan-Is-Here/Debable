@@ -18,7 +18,7 @@ This report is generated at the start of each new phase and covers all progress 
 | Phase 4 — Matchmaking | ✅ Complete |
 | Phase 5 — Video | ✅ Complete |
 | **Phase 6 — Chat** | ✅ **Complete** (merged to `main`) |
-| Phase 7 — AI Fact Check | 🔵 Starting now |
+| **Phase 7 — AI Fact Check** | ✅ **Complete** |
 | Phase 8 — Ratings | ⏳ Pending |
 | Phase 9 — Polish & Deploy | ⏳ Pending |
 | Phase 10 — Professional UI/UX Redesign | ⏳ Pending |
@@ -184,6 +184,78 @@ citations that resolve, and it is still there after a reload.
 
 ---
 
+## Phase 7 outcome — what the plan above got wrong
+
+The plan opened by saying this phase had the thinnest blueprint in the project. That turned
+out to matter less than something it did not anticipate: **the documentation for the paid
+services was wrong twice, and only a real API call revealed it.**
+
+### Google Search grounding is unobtainable on a free account
+
+The plan chose Gemini specifically because its pricing page lists free Google Search
+grounding. Both halves of that turned out to be closed:
+
+- `gemini-2.5-flash` — the only model with a free grounding quota — returns
+  **404: "no longer available to new users"**.
+- `gemini-3.6-flash` with the `google_search` tool returns **429 RESOURCE_EXHAUSTED on the
+  first call**, before any successful generation. A zero quota, not a spent one, matching the
+  "Grounding: Not available" on every 3.x Free Tier row.
+- Plain generation on those models works fine. The key was healthy; only retrieval was shut.
+
+Before that, the phase had already moved off Anthropic for cost. So the provider changed
+twice before a line of the service layer existed — which is the strongest possible argument
+for the `FactCheckProvider` protocol the plan happened to specify first. The service layer,
+the guards, the rate limits and the persistence never changed at all.
+
+### Being forced to retrieve separately made the design better
+
+Doing the search ourselves beat both grounding designs on the axes that matter:
+
+| | Grounding (planned) | Shipped |
+|---|---|---|
+| Allowlist | Post-filter — the model could *read* untrusted pages, we only dropped citations | **Enforced at retrieval** — untrusted pages are never fetched |
+| Output | Text parsing, since schemas and grounding conflict on Gemini 2.5 | **Structured JSON** — no tool in the request, no conflict |
+| Citations | Opaque `vertexaisearch` redirect URLs | Real publisher URLs from the search we ran |
+
+Citations also became impossible to invent rather than merely unlikely: the model selects
+from numbered sources by index, and an index outside the supplied range is discarded.
+
+### Three bugs found by running it, not reading about it
+
+1. **Wikimedia enforces its User-Agent policy.** A generic agent gets a `403` linking to the
+   policy. The agent now names the application and a contact.
+2. **Wikipedia was missing from the trusted-source allowlist** — a test actively asserted it
+   was untrusted. Since it is the retrieval backend when no Tavily key is set, *every*
+   Wikipedia-backed verdict had its citations stripped and was silently downgraded to
+   `unverified`. The original exclusion applied the wrong test: what matters is whether a
+   debater can check a citation in one click.
+3. **Clerk never loads on a non-`localhost` origin**, which produced an eternal spinner, a
+   header with no sign-in button, and a matchmaking poll that never ran — three symptoms, one
+   cause, nothing on screen connecting them. Fixed by `useAuthReady`.
+
+### What shipped
+
+Three configurations, each degrading to something needing no credentials:
+
+| `.env` | Judgment | Evidence |
+|---|---|---|
+| no keys | Stub | none — fake verdicts, whole flow works |
+| `GEMINI_API_KEY` | Gemini 3.6 Flash | Wikipedia |
+| `+ TAVILY_API_KEY` | Gemini 3.6 Flash | Full trusted-source allowlist, enforced at retrieval |
+
+**Verified live:** *"The Great Depression began with a stock market crash in 1929"* returns
+`true`, citing the Wall Street crash of 1929 and Great Depression articles. Confirmed by hand
+in two windows: the card appears in both without a refresh and survives a reload.
+
+216 backend tests pass, 0 skipped. **None of them touch a network** — that is load-bearing
+rather than tidy: a suite spending one Tavily credit per run would exhaust a 1,000-a-month
+allowance in a fortnight of ordinary development.
+
+The rule the phase was built around held: `UNVERIFIED` is a verdict, `FactCheckUnavailable`
+is an error, and the two never collapse. A failed check persists nothing.
+
+---
+
 ## Verification status
 
 | Area | Evidence |
@@ -196,7 +268,7 @@ citations that resolve, and it is still there after a reload.
 | Matchmaking | Confirmed by hand: two accounts, two windows, both flip to matched |
 | Video | Confirmed by hand: audio, video, camera-off and mute all cross correctly |
 | Chat | Confirmed by hand: messages cross without a refresh and survive a reload |
-| Fact-check | ⏳ Not started |
+| Fact-check | 216 tests, none touching a network. **Confirmed by hand:** a verdict card appears in both windows without a refresh, with citations that resolve, and survives a reload |
 
 ---
 
