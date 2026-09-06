@@ -1,7 +1,7 @@
 # Debable — Complete Progress Report
 
 **Written:** 2026-08-14 · **Updated:** 2026-08-15 · **Repository:** https://github.com/Aryan-Is-Here/Debable
-**State:** Phases 0–7 merged to `main`. Phase 8 (Ratings) is next.
+**State:** Phases 0–8 merged to `main`. Phase 9 (Polish & Deploy) is next.
 
 This is the full narrative: what the product is, how it has been built, why every tool was
 chosen over its alternatives, what remains, and what will bite you. Companion documents:
@@ -304,12 +304,42 @@ citations that resolve, and it survives a reload.
 
 ---
 
-## 5. What remains
+### Phase 8 — Ratings ✅
 
-### Phase 8 — Ratings
-`POST /room/{id}/rating`, wire `RatingForm`. The one-rating-per-reviewer-per-room rule already
-exists as a unique constraint, so the service only needs to translate the violation into a
-clean error.
+The last mock data in the product, and two findings worth more than the feature.
+
+**The results page was rating nobody.** It rendered `mockDebateRoom` for *any* roomId: the
+form submitted, a toast appeared, and nothing was written. It survived seven phases precisely
+because it never looked broken. Loading the real room also brought the participant guard with
+it, so a debate you were not in is now a 403 rather than a form you can fill in.
+
+**And the page nothing led to.** It was reachable only by the one-time redirect after ending a
+debate. Every test passed, because tests address the URL directly — but through the UI, a
+debate you skipped rating was stranded permanently. Profile history rows now link to it.
+
+That is the **second** time this project has shipped working, tested code that nothing
+reached; Phase 5's opponent mute indicator was the first. Both were found by a person using
+the product. The lesson is recorded as §5.28: a passing test cannot tell you whether anything
+navigates to the code.
+
+**The schema shaped the service.** `ratings` already carried the uniqueness constraint, the
+1–5 range and the no-self-review rule, so uniqueness is enforced by letting the insert fail
+and translating `IntegrityError` — a "have they rated?" read followed by an insert is a
+*longer* race than the insert alone. A second attempt is refused rather than allowed to
+overwrite: an overwrite would let someone revise a score after seeing the reply.
+
+Three product decisions taken deliberately: rating stays skippable, because a forced rating
+produces compliance rather than signal; `averageRating` is null before anyone has rated you,
+because a 0 reads as terrible and a 5 is a lie; and `/profile` is the caller's own only,
+because a public profile would expose who debated whom.
+
+**`frontend/lib/mock/` is deleted.** Every screen renders server data, and `lib/types.ts` —
+written in Phase 1 before a backend existed — never changed. The screens changed data source,
+which is exactly what it was for.
+
+---
+
+## 5. What remains
 
 ### Phase 9 — Polish & Deploy
 Resolves **conflict #1**: the Reports feature has no table in doc 04 — add
@@ -376,6 +406,12 @@ the screen looking alive. Read endpoints are safe to call at any time.
 changes as the session settles; an effect depending on it withdrew the user from the queue
 mid-session. Mirror such values into a ref and give the cleanup an empty dependency array.
 
+**A passing test cannot tell you whether anything reaches the code.** Twice now this project
+has shipped working, tested code that nothing led to: Phase 5's opponent mute indicator
+(rendered, never passed its prop) and Phase 8's results page (correct, reachable only by a
+one-time redirect). Both were found by a person using the product. When a feature is done, ask
+what in the UI navigates to it.
+
 **Presence must be proven, never promised.** A closed tab cannot reliably withdraw itself.
 `match_queue.last_seen_at` is refreshed by every poll; entries that stop being refreshed are
 excluded and swept. Use the same shape for any future "who is here" state.
@@ -428,7 +464,7 @@ The LiveKit secret is a signing key — the browser only ever receives a minted 
 
 | Area | Evidence |
 |---|---|
-| Backend suite | 216 tests pass, 0 skipped. None touch a network — the fact-check provider and search backends are stubbed |
+| Backend suite | 242 tests pass, 0 skipped. None touch a network |
 | Lint/format | `ruff check`, `ruff format --check`, `eslint` all clean |
 | Build | `npm run build` compiles all 9 routes, no type errors |
 | Migrations | `alembic check` reports no drift; up/down round trip verified |
@@ -437,4 +473,5 @@ The LiveKit secret is a signing key — the browser only ever receives a minted 
 | Matchmaking | Confirmed by hand: two accounts, two windows, both flip to matched, same room |
 | Video | Confirmed by hand: two accounts see and hear each other. Camera-off and mute state both cross correctly as of `85f1dd0` — before that, neither did |
 | Fact-check | 27 automated tests, none touching a network. Confirmed by hand: a verdict appears in both windows with citations that resolve, and survives a reload |
+| Ratings | 26 automated tests. Confirmed by hand: a rating persists, shows on the profile, is reachable from history, and a second attempt is refused |
 | Chat | 27 automated tests including two sockets in one room; refusals (bad token, silence, disallowed origin) confirmed against the running server. **Confirmed by hand:** messages cross both ways without a refresh and survive a reload |

@@ -19,7 +19,7 @@ This report is generated at the start of each new phase and covers all progress 
 | Phase 5 — Video | ✅ Complete |
 | Phase 6 — Chat | ✅ Complete |
 | **Phase 7 — AI Fact Check** | ✅ **Complete** (merged to `main`) |
-| Phase 8 — Ratings | 🔵 Starting now |
+| **Phase 8 — Ratings** | ✅ **Complete** |
 | Phase 9 — Polish & Deploy | ⏳ Pending |
 | Phase 10 — Professional UI/UX Redesign | ⏳ Pending |
 
@@ -142,6 +142,61 @@ attempt from the same reviewer is refused rather than silently overwriting the f
 
 ---
 
+## Phase 8 outcome
+
+All three decisions were taken as proposed: rating stays skippable, `averageRating` is null
+rather than a number before anyone has rated you, and comments are stored but not shown
+attributed.
+
+### The results page was rating nobody
+
+The plan called this "the most misleading remaining mock, because it looks correct" and that
+was accurate. `app/debate/[roomId]/results/page.tsx` rendered `mockDebateRoom` for **any**
+roomId: the form submitted, a toast appeared, and nothing was written. It survived seven
+phases precisely because it never looked broken.
+
+Loading the real room also brought the participant guard with it — a debate you were not in
+is now a 403 rather than a form you can fill in.
+
+### The schema did the work, and that shaped the service
+
+`ratings` already carried a `UniqueConstraint` on `(room_id, reviewer_id)`, a 1–5
+`CheckConstraint` and a no-self-review check. So uniqueness is enforced by letting the insert
+fail and translating `IntegrityError` into a 409, rather than querying first. That is not
+laziness: a "have they rated?" read followed by an insert is a *longer* race than the insert
+alone — two submissions milliseconds apart would both read "no" and both proceed.
+
+A second attempt is refused rather than allowed to overwrite. An overwrite would let someone
+revise a score after seeing the reply, and would destroy the original silently.
+
+### A gap found in use, not in tests
+
+The results page was reachable only by the one-time redirect after ending a debate. Every test
+passed, because tests address the URL directly. But through the UI, a rating you had given —
+and, worse, a finished debate you had *not yet* rated — could afterwards be found only by
+assembling the URL by hand. Hitting Skip, or closing the tab, stranded that debate
+permanently.
+
+Profile history rows are now links to their results page. **This is the second time this
+project has shipped something that worked and could not be reached** — the first was Phase 5's
+mute indicator, which was rendered but never wired. Both were invisible to tests for the same
+reason: a test that calls the thing directly cannot tell you whether anything calls it.
+
+### Every mock is gone
+
+`frontend/lib/mock/` has no remaining references and was deleted. Every screen in the product
+now renders server data.
+
+`lib/types.ts`, written in Phase 1 as the contract before any backend existed, **never
+changed**. The screens changed data source. That was the bet made in Phase 1, and it paid off
+in every phase since.
+
+**242 backend tests pass, 0 skipped.** No migration: the `ratings` table has existed since the
+initial schema. Confirmed by hand: rate a real opponent, see it on the profile, revisit and
+get the already-rated screen, and reach it from profile history.
+
+---
+
 ## Verification status
 
 | Area | Evidence |
@@ -155,7 +210,7 @@ attempt from the same reviewer is refused rather than silently overwriting the f
 | Video | Confirmed by hand: audio, video, camera-off and mute all cross correctly |
 | Chat | Confirmed by hand: messages cross without a refresh and survive a reload |
 | Fact-check | Confirmed by hand: a verdict appears in both windows with citations that resolve |
-| Ratings | ⏳ Not started |
+| Ratings | 26 automated tests. **Confirmed by hand:** a rating persists, shows on the profile, and a second attempt is refused rather than overwriting |
 
 ---
 
