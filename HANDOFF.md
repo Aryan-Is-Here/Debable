@@ -8,6 +8,20 @@ reasoning see [`docs/COMPLETE-PROGRESS-REPORT.md`](docs/COMPLETE-PROGRESS-REPORT
 
 ---
 
+## 0. Read this before you run anything
+
+**Use `http://localhost:3000`. Nothing else works.** A LAN address or `127.0.0.1` breaks three
+things at once: Clerk never loads (the dev instance is bound to specific origins), CORS blocks
+the API, and the chat socket's `Origin` check refuses the handshake. This cost real debugging
+time — it presented as an eternal spinner, a header with no sign-in button, and a matchmaking
+poll that never ran. Three symptoms, one cause. The app now explains itself after ~8 seconds
+(`frontend/hooks/use-auth-ready.ts`), but the address is still the fix.
+
+To serve another device, `CORS_ORIGINS`, `NEXT_PUBLIC_API_BASE_URL` and Clerk's allowed
+origins must be updated together.
+
+---
+
 ## 1. The goal
 
 **Debable** is a random video debate platform that matches strangers by *debate topic* rather
@@ -15,12 +29,16 @@ than by random interest. Its differentiator is an **on-demand AI fact-check**: m
 either participant submits one specific claim, the backend sends only that claim to an
 isolated AI service, and the verdict is posted into the debate chat.
 
-The MVP exists to answer one question: **can AI-assisted fact-checking improve online
-debates?** Every scope decision defers to that. Leaderboards, ELO, always-listening AI,
-moderation, tournaments and premium tiers are explicitly out.
+Ten phases, built strictly in order, one branch each. **Phases 0–7 are merged to `main`.**
+Phase 8 (Ratings) is next and has not been started.
 
-Ten phases, built strictly in order, one branch each. **Phases 0–6 are merged to `main`.**
-Phase 7 (AI Fact Check) is next and has not been started.
+**On "the goal", precisely.** `docs/01-product-vision.md` states the MVP success metric as
+*"two strangers can successfully debate and use AI fact-checking during the conversation"* — a
+**capability** metric, and Phase 7 met it. The framing used elsewhere, *"can fact-checking
+improve debates?"*, is an **outcome** question that nothing currently measures. The decision
+taken is to ship the ten phases as specified. That does not foreclose the outcome question:
+`ratings.room_id` and `fact_checks.room_id` join on the same room, so "debates with a
+fact-check versus without" stays a query rather than a migration. Keep it that way.
 
 ---
 
@@ -29,34 +47,42 @@ Phase 7 (AI Fact Check) is next and has not been started.
 | Phase | State |
 |---|---|
 | 0 Planning | ✅ merged |
-| 1 UI Prototype | ✅ merged — 8 screens, then mock data |
-| 2 Backend Foundation | ✅ merged — FastAPI, Postgres, Alembic, Clerk verification, health |
-| 3 Topics | ✅ merged — real topic CRUD, frontend on live data |
-| 4 Matchmaking | ✅ merged — queue, pairing, debate rooms |
-| 5 Video | ✅ merged — real LiveKit audio and video, verified live |
-| 6 Chat | ✅ merged — real-time text over a WebSocket, persisted |
-| **7 AI Fact Check** | 🔵 **next, not started** |
-| 8–10 | ⏳ not started |
+| 1 UI Prototype | ✅ merged |
+| 2 Backend Foundation | ✅ merged |
+| 3 Topics | ✅ merged |
+| 4 Matchmaking | ✅ merged |
+| 5 Video | ✅ merged |
+| 6 Chat | ✅ merged |
+| 7 AI Fact Check | ✅ merged |
+| **8 Ratings** | 🔵 **next, not started** |
+| 9–10 | ⏳ not started |
 
-**Works end to end today:** sign in with Clerk → browse and search real topics → create a
-topic that survives a reload → queue for a topic → get paired with a second account → land in
-a shared debate room → see and hear each other over real WebRTC → **type to each other, with
-the transcript surviving a reload.**
+**Works end to end today:** sign in → browse or create a topic → queue → get paired → land in
+a shared room → see and hear each other over WebRTC → hold a text conversation that survives a
+reload → **fact-check a claim and have the verdict appear in both windows with citations that
+resolve.**
 
-**Verified by tests:** 136 backend tests pass (`cd backend && uv run pytest`). Frontend lint
-and production build are clean.
+**Verified by tests:** 216 backend tests. Frontend lint and production build clean.
 
-⚠️ **99 of those 136 tests need Postgres and skip silently if Docker is not running.** A green
-run with a high skip count proves almost nothing — always read the skip line. (An earlier
-version of these docs claimed "63 of 109"; that figure was never measured and was wrong. 99 is
-measured.)
+⚠️ **Most of those tests need Postgres and skip silently without it.** A green run with a high
+skip count proves almost nothing — always read the skip line. This has now bitten three times.
 
-**Still mock, by design:** the fact-check verdict is deterministic mock output generated in
-the browser (Phase 7), the rating form does not persist (Phase 8), and Profile shows mock
-stats.
+**Still mock, by design:** the rating form does not persist, the results page renders the demo
+room for any roomId, Profile shows mock stats, and Settings reads a mock user. All Phase 8.
 
-The core loop is now real from sign-in through to a live debate with a working conversation.
-What remains is the fact-check the whole product exists to test.
+### The fact-check has three configurations
+
+Each degrades to something needing no credentials, so a fresh clone runs the whole flow:
+
+| `backend/.env` | Judgment | Evidence |
+|---|---|---|
+| no keys | Stub — deterministic fake verdicts | none |
+| `GEMINI_API_KEY` | Gemini 3.6 Flash | Wikipedia (no account needed) |
+| `+ TAVILY_API_KEY` | Gemini 3.6 Flash | Full trusted-source allowlist, enforced at retrieval |
+
+Currently running: **Gemini + Wikipedia.** Tavily is written and dormant — free at
+[app.tavily.com](https://app.tavily.com), 1,000 searches/month, no card. Add the key and
+restart; nothing else changes.
 
 ### Running it
 
@@ -67,134 +93,91 @@ cd frontend && npm run dev
 ```
 
 Use `python -m app`, never bare `uvicorn`: on Windows psycopg's async driver cannot run on the
-default `ProactorEventLoop`, and that entrypoint fixes the policy before the loop is created.
+default `ProactorEventLoop`.
 
 Secrets live in `backend/.env` and `frontend/.env.local`, both gitignored. Required:
-`DATABASE_URL`, `CLERK_ISSUER`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`;
-frontend needs `NEXT_PUBLIC_API_BASE_URL`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and
-`CLERK_SECRET_KEY`.
+`DATABASE_URL`, `CLERK_ISSUER`, `LIVEKIT_*`; frontend needs `NEXT_PUBLIC_API_BASE_URL`,
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`. Optional: `GEMINI_API_KEY`,
+`TAVILY_API_KEY`.
 
 ---
 
-## 3. Where Phase 7 will land
+## 3. Where Phase 8 will land
 
-Nothing is mid-edit — the tree is clean and Phase 6 is merged. These are the files Phase 7
-(AI Fact Check) will touch, and the ones worth reading first:
-
-| File | Why it matters to Phase 7 |
+| File | Why it matters |
 |---|---|
-| `backend/app/ai/` | **Empty.** Scaffolded in Phase 0 for exactly this; the AI service client goes here |
-| `backend/app/models/fact_check.py` | The table already exists — claim, verdict enum, explanation, JSONB sources |
-| `backend/app/services/chat.py` | The shape to copy: participant guard via `to_room_read()`, reject ended rooms, persist, then broadcast |
-| `backend/app/websocket/registry.py` | `chat_registry.broadcast()` is how a verdict reaches both windows |
-| `backend/app/api/v1/chat.py` | Where `POST /rooms/{id}/fact-check` belongs, and the pattern for its refusals |
-| `frontend/components/debate-room-view.tsx` | Holds `mockFactCheck` and the local fact-check array to replace |
-| `frontend/components/fact-check-dialog.tsx` | Already collects the claim; only its submit handler changes |
-| `docs/10-ai-fact-check-design.md` | The RAG design and the verdict vocabulary |
+| `backend/app/models/rating.py` | **The schema already does the work** — a `UniqueConstraint` on `(room_id, reviewer_id)`, a 1–5 `CheckConstraint`, and one forbidding self-review |
+| `backend/app/services/chat.py` | The shape to copy: participant guard via `to_room_read()`, reject ended rooms, persist |
+| `frontend/app/debate/[roomId]/results/page.tsx` | Uses `mockDebateRoom` for **any** roomId — rating currently "works" while rating nothing |
+| `frontend/components/debate-room-loader.tsx` | The pattern for loading a real room client-side with a Clerk token |
+| `frontend/app/profile/page.tsx`, `frontend/components/settings-view.tsx` | The last two mock call-sites |
 
-**One design question to settle first:** a fact-check is not a `messages` row —
-`messages.sender_id` is `NOT NULL` and references `users`, so a "system" message has no author
-to point at. See `docs/PROJECT-HANDBOOK.md` §7 for the two options and the recommendation.
+Because the constraints exist, the service translates an `IntegrityError` into a clean 409
+rather than re-checking — the same shape `match.join` already uses.
+
+---
 
 ## 4. What was tried and failed
 
-### Phase 6 (chat) — two real bugs, both found by tests rather than guessed at
+### Phase 7 — the documentation was wrong twice, and only a real call showed it
 
-1. **Postgres `now()` is the transaction start time.** Three messages written inside one
-   transaction shared a `created_at` down to the byte, so the ordered read fell through to its
-   random-UUID tiebreak and returned them *shuffled*. Fixed by setting `created_at` to
-   `clock_timestamp()` at insert. No migration was needed.
-2. **`httpx-ws`'s transport holds an anyio cancel scope**, and pytest-asyncio finalises async
-   fixtures in a *different task* than it sets them up in — so a fixture yielding an entered
-   client blew up in teardown. Socket tests open their client inside the test body instead.
+The phase chose Anthropic, then Gemini-with-grounding, and shipped **neither**. The provider
+changed twice before a line of the service layer existed.
 
-### Phase 4 (matchmaking) — three rounds of debugging after the feature "worked"
+- `gemini-2.5-flash`, the only model with a free grounding quota on the pricing page, returns
+  **404: "no longer available to new users"**.
+- `gemini-3.6-flash` with the search tool returns **429 on the first call** — a zero quota,
+  not a spent one.
+- Plain generation works fine. Only retrieval was closed.
 
-The failures are more instructive than the fixes, and two of them were wrong diagnoses.
+**The lesson (handbook §5.25): verify a third party's free tier with a real call before
+designing around it.** One throwaway script cost one request and saved a rewrite. This is the
+Phase 5 lesson — validate LiveKit credentials before building on them — generalised, and it
+had to be learned twice.
 
-**Fixes that were correct but were not the reported bug**
+**The forced change improved the design.** Doing retrieval ourselves made the allowlist a
+constraint on *what is fetched* rather than a filter on *what is cited*, and removed the tool
+from the request, which is what allows structured JSON output.
 
-1. **`refetchIntervalInBackground`.** Diagnosed the stalled waiting room as TanStack Query
-   skipping fetches while `document.visibilityState === "hidden"`. That behaviour is real, but
-   it was **not** the cause. Kept because it is correct for genuinely hidden windows.
-2. **The 60-second clock-skew allowance in Clerk verification.** Real and measured (this
-   machine ran 13.3s behind Clerk, and Clerk stamps `nbf`). Worth keeping, but it explained
-   scattered 401s, not the stall.
+Two more bugs found by running it: Wikimedia enforces its User-Agent policy (a generic agent
+gets a 403), and Wikipedia was missing from the trusted-source allowlist — a test actively
+asserted it was untrusted — so every Wikipedia-backed verdict was silently downgraded to
+`unverified`.
 
-**The methodological failures worth remembering**
+### Phase 6 — two Phase 5 bugs, both the same mistake
 
-3. **Read the wrong log file.** Counted "zero `GET /match` requests" from a log belonging to a
-   different backend process. A whole diagnosis was built on it. *(This bit again in Phase 6:
-   port 8000 can be owned by someone else's server. Confirm the log you are reading is the one
-   your traffic went to before drawing a conclusion from it.)*
-4. **Four isolation harnesses that all failed to reproduce.** Every added difference was
-   exonerated. Reverse-engineering the observer's internals was abandoned after three attempts.
-5. **Guessing instead of instrumenting.** What finally resolved it was a development-only
-   readout under the spinner. It showed `join=false` with `status=queued` — the query was
-   disabled while stale cache kept the screen looking alive. That line should have been the
-   *first* move, not the fourth. It is still in `waiting-room.tsx`, and `ChatPanel` now
-   carries the same kind of readout for the socket.
+Presence was inferred from whether a camera track existed, and the opponent's mute state from
+nothing at all. **Both inferred a fact from a proxy that merely correlates with it**, and both
+survived a Phase 5 manual check *that passed*, because that check ran with both cameras on.
+Hence handbook §5.24: when verifying by hand, toggle the optional things.
 
-**The actual root causes, once found**
+### Phase 4 — three rounds of debugging after the feature "worked"
 
-- The withdraw-on-leave effect depended on Clerk's `getToken`, whose identity changes as the
-  session settles — and React runs an effect's cleanup when dependencies change, not only on
-  unmount. The page was withdrawing itself from the queue while the user watched. *(The chat
-  hook mirrors `getToken` into a ref for exactly this reason.)*
-- Rooms only end via the End debate button, so closing a tab left one open — and joining used
-  to *return* an open room, trapping both participants with a partner who had left.
-- The poll was gated on the join mutation succeeding. **Never gate a poll on a mutation.**
-- A closed tab cannot reliably withdraw itself, so queue presence is proven by continued
-  polling rather than promised on exit.
+- Effect cleanups run on **dependency change**, not only unmount. Clerk's `getToken` identity
+  changes as the session settles; the page withdrew itself from the queue mid-session.
+- **Never gate a poll on a mutation.** Read endpoints are safe to call at any time.
+- **Presence is proven by polling, never promised on exit.**
+- **Instrument before guessing.** A spinner looks identical whether the client is polling,
+  failing silently, or not polling at all. The dev readout that ended it is still in
+  `waiting-room.tsx`, and `ChatPanel` carries the equivalent for the socket.
 
 ---
 
 ## 5. The next step
 
-**Start Phase 7 — AI Fact Check.** Branch `feature/fact-check`. Write the progress report to
+**Start Phase 8 — Ratings.** Branch `feature/ratings`. Write the progress report to
 `docs/progress/` first; that is the routine at every phase start.
+`docs/PROJECT-HANDBOOK.md` §7 has the step-by-step.
 
-This is the feature the entire project exists to evaluate, and the first one that depends on a
-third party with real latency and real cost. `docs/PROJECT-HANDBOOK.md` §7 has the step-by-step
-plan. Decide before writing code:
+**The check that will prove it:** a rating submitted after a debate persists, appears on the
+rated user's profile, and a second attempt from the same reviewer is refused.
 
-1. **How the verdict reaches the chat** — its own frame type and endpoint, or a new kind of
-   `messages` row (which needs a migration, because `sender_id` is `NOT NULL`). The handbook
-   recommends the former, and notes the consequence: reloads then need a
-   `GET /rooms/{id}/fact-checks`.
-2. **What happens when the AI is slow or down.** It must not block the socket's receive loop,
-   and a failure needs a visible outcome rather than silence.
-3. **Rate limiting.** This is the endpoint that costs money.
+### Then, briefly
 
-**The check that will prove it:** a claim submitted in one window produces the same verdict
-card in *both* windows, and it is still there after a reload.
-
-Before starting, read §5.14–5.22 of `docs/PROJECT-HANDBOOK.md` and §7 of
-`docs/COMPLETE-PROGRESS-REPORT.md`. Two apply immediately: the connection registry is
-per-worker, so a broadcast verdict inherits chat's deployment constraint; and an AI call that
-is merely slow looks exactly like one that is broken, so instrument it before guessing.
-
----
-
-## 6. Manual verification — done
-
-Confirmed by hand on 2026-08-17, two accounts in two windows: messages cross both ways without
-a refresh, and the full history survives a reload of either window. That is the check the
-phase existed to pass.
-
-The dev-only line under the composer (`dev · ws=… · msgs=… · you=… · last=…`) tells you which
-state the socket is actually in — use it rather than inferring from a quiet panel.
-
-**That same session found two Phase 5 video bugs** (fixed in `85f1dd0`), and how they were
-missed matters more than what they were:
-
-- Participant presence was inferred from whether a camera track existed. Turning a camera off
-  unpublishes the track, so "camera off" and "never joined" were indistinguishable — one side
-  showed "Waiting for them to join…" over someone who had been there all along.
-- The opponent's tile never passed its `muted` prop, so an opponent always rendered as
-  unmuted. The handbook's claim that "mute crosses between windows" was only true of video.
-
-Both survived a Phase 5 manual check **that passed** — because that check ran with both
-cameras on. When verifying by hand, toggle the optional things: camera off, mic muted, one tab
-closed. A check that only covers the configuration you expect will keep reporting success.
-See handbook §5.23–5.24.
+- **Phase 9 — Polish & Deploy.** Resolves conflict #1: the Reports feature has no table, so
+  `reports` is the **only migration left in the project**. Deployment must be researched at
+  the time, not planned now — free tiers moved twice during Phase 7. **Hard constraint:** the
+  chat connection registry is per-process, so the API must be pinned to one worker or given a
+  broker, or two debaters on different workers see none of each other's messages.
+- **Phase 10 — UI/UX redesign.** Deliberately last, so it is done once against a finished
+  product. Everything on screen is still Phase 1 prototype styling.

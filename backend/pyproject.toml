@@ -15,6 +15,7 @@ dependencies = [
     "httpx>=0.28",
     "pyjwt[crypto]>=2.10",
     "livekit-api>=1.0",
+    "google-genai>=2.21.0",
 ]
 
 [dependency-groups]

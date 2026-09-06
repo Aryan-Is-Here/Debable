@@ -1,14 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@clerk/nextjs";
 import { Loader2, PhoneOff } from "lucide-react";
 
-import type { ChatMessage, DebateRoom } from "@/lib/types";
-import { mockFactCheck } from "@/lib/mock/debate";
+import type { DebateRoom } from "@/lib/types";
 import { useDebateChat } from "@/hooks/use-debate-chat";
+import { requestFactCheck } from "@/services/fact-check";
 import { endRoom, matchKeys } from "@/services/match";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,23 +18,18 @@ interface DebateRoomViewProps {
   room: DebateRoom;
 }
 
-/** Simulated AI latency for the mock fact-check (ms). */
-const FACT_CHECK_DELAY_MS = 1200;
-
 /**
  * Debate Room orchestrator: owns the controls and wires the fact-check flow.
  *
- * Chat is real as of Phase 6 — the transcript comes from the server through
- * `useDebateChat`, not from local state. Fact-check results are still generated on the
- * client and kept alongside it until Phase 7 gives them a real service and a place in the
- * `messages` table.
+ * Everything on screen is now server state. The transcript and the AI verdicts both arrive
+ * through `useDebateChat` — verdicts are pushed over the same socket, so they appear in
+ * both windows at once rather than only for whoever asked.
  */
 export function DebateRoomView({ room }: DebateRoomViewProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { getToken } = useAuth();
   const chat = useDebateChat(room.id);
-  const [factCheckMessages, setFactCheckMessages] = useState<ChatMessage[]>([]);
 
   const { mutate: endDebate, isPending: isEnding } = useMutation({
     mutationFn: async () => endRoom(room.id, await getToken()),
@@ -47,30 +41,11 @@ export function DebateRoomView({ room }: DebateRoomViewProps) {
     },
   });
 
-  // Server transcript plus the client-only fact-check cards, interleaved by time. Kept
-  // separate rather than appended into one array because only one of them is real: the
-  // chat half is authoritative and can change under a reconnect, while the fact-check half
-  // is local until Phase 7.
-  const messages = useMemo(() => {
-    if (factCheckMessages.length === 0) return chat.messages;
-    return [...chat.messages, ...factCheckMessages].sort((a, b) =>
-      a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0,
-    );
-  }, [chat.messages, factCheckMessages]);
-
   async function handleFactCheck(claim: string) {
-    // Mock the AI service round-trip; result lands in chat as a system message.
-    await new Promise((resolve) => setTimeout(resolve, FACT_CHECK_DELAY_MS));
-    setFactCheckMessages((previous) => [
-      ...previous,
-      {
-        id: `m_fc_${Date.now()}`,
-        author: "system",
-        content: "",
-        createdAt: new Date().toISOString(),
-        factCheck: mockFactCheck(claim),
-      },
-    ]);
+    // The verdict is not appended here. The server broadcasts it over the chat socket, so
+    // it arrives the same way for both debaters — including the one who asked. One source
+    // of truth beats an optimistic copy that can disagree with what the other side sees.
+    await requestFactCheck(room.id, claim, await getToken());
   }
 
   return (
@@ -102,7 +77,7 @@ export function DebateRoomView({ room }: DebateRoomViewProps) {
 
         <ChatPanel
           room={room}
-          messages={messages}
+          messages={chat.messages}
           onSend={chat.send}
           status={chat.status}
           error={chat.error}

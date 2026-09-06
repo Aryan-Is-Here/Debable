@@ -15,6 +15,7 @@ from typing import Annotated, Literal
 from pydantic import Field, TypeAdapter, field_validator
 
 from app.schemas.base import CamelModel
+from app.schemas.fact_check import FactCheckRead
 
 # An upper bound on one message. Generous for debate chat, but a bound the socket can rely
 # on: without one, a single frame can be as large as the client cares to make it.
@@ -87,6 +88,19 @@ class MessageFrame(CamelModel):
 
     type: Literal["message"] = "message"
     message: MessageRead
+
+
+class FactCheckFrame(CamelModel):
+    """An AI verdict, pushed to both debaters.
+
+    Its own frame type rather than a message, because ``messages.sender_id`` is ``NOT NULL``
+    and references ``users`` — a system-authored row has no author to point at. Keeping them
+    apart avoids a migration and a nullable foreign key, at the cost of a second history
+    endpoint (``GET /rooms/{id}/fact-checks``) for reloads.
+    """
+
+    type: Literal["fact_check"] = "fact_check"
+    fact_check: "FactCheckRead"
 
 
 class ErrorFrame(CamelModel):

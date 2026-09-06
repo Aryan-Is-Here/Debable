@@ -1,6 +1,6 @@
 # Debable — Complete Project Handbook
 
-**Generated:** 2026-07-18 · **Last updated:** 2026-08-17 · **Project state:** Phases 1–6 complete, Phase 7 next
+**Generated:** 2026-07-18 · **Last updated:** 2026-08-17 · **Project state:** Phases 1–7 complete, Phase 8 next
 **Repository:** https://github.com/Aryan-Is-Here/Debable
 **Local path:** `E:\Projects\Debable`
 
@@ -39,7 +39,7 @@ The blueprint in `docs/` (13 documents: PRD, architecture, database, API spec, U
 | Backend | FastAPI, SQLAlchemy 2 (async), Alembic, PostgreSQL 16, uv | ✅ In use |
 | Video | LiveKit Cloud | ✅ In use |
 | Auth | **Clerk** (backend verifies Clerk JWTs; no login endpoint) | ✅ Backend side done |
-| AI | RAG + LLM (default: Anthropic Claude), isolated service | ⏳ Phase 7 |
+| AI | Gemini 3.6 Flash for judgment + our own retrieval (Tavily or Wikipedia) | ✅ In use |
 | Local dev | Docker Compose (postgres:16 + api) | ✅ In use |
 | Deploy | Vercel (frontend), Railway/Fly.io (backend), Neon/Supabase (Postgres), LiveKit Cloud | ⏳ Phase 9 |
 
@@ -55,14 +55,14 @@ E:\Projects\Debable          (git repo, remote: Aryan-Is-Here/Debable)
 │   ├── 01…12-*.md           PRD, architecture, DB, API, UI, roadmap, etc.
 │   ├── 13-prompts/          Per-area prompt templates
 │   └── progress/            Dated progress reports (one per phase start)
-├── frontend/                Next.js app — live against the API (Phases 1, 3, 4, 5)
+├── frontend/                Next.js app — live against the API (no mock data left in the debate loop)
 │   ├── app/                 Routes (see §4)
 │   ├── components/          Feature components + components/ui/ (shadcn)
-│   ├── hooks/               (empty — for future custom hooks)
+│   ├── hooks/               use-debate-chat, use-auth-ready
 │   ├── lib/                 types.ts, utils.ts, mock/, validation/
-│   ├── services/            API clients: api-client, topics, match, video
+│   ├── services/            API clients: api-client, topics, match, video, chat, fact-check
 │   └── styles/              (empty — globals live in app/globals.css)
-├── backend/                 FastAPI service — Phases 2-5 complete
+├── backend/                 FastAPI service — Phases 2-7 complete
 │   ├── app/
 │   │   ├── main.py          App factory: CORS, lifespan, exception handlers
 │   │   ├── __main__.py      Dev entrypoint (`python -m app`) — see §5.11
@@ -72,10 +72,12 @@ E:\Projects\Debable          (git repo, remote: Aryan-Is-Here/Debable)
 │   │   ├── schemas/         health, topic, match, video, user, common (camelCase out)
 │   │   ├── auth/            clerk.py, jwks.py, dependencies.py
 │   │   ├── api/v1/          router, health, topics, match (incl. video token)
-│   │   ├── services/        topic, match, video
-│   │   ├── repositories/    topic, match
-│   │   └── {websocket,ai,utils}/   (empty — Phases 6 and 7)
-│   ├── tests/               136 tests; 99 need Postgres and SKIP without it
+│   │   ├── services/        topic, match, video, chat, fact_check
+│   │   ├── repositories/    topic, match, message, fact_check
+│   │   ├── websocket/       registry, auth, protocol (Phase 6)
+│   │   ├── ai/              base, gemini, stub, factory (Phase 7)
+│   │   └── search/          base, tavily, wikipedia (Phase 7)
+│   ├── tests/               216 tests; most need Postgres and SKIP without it
 │   ├── migrations/          Alembic env + 4 revisions (0001-0004)
 │   ├── pyproject.toml       uv-managed deps, ruff + pytest config
 │   ├── alembic.ini
@@ -88,7 +90,7 @@ E:\Projects\Debable          (git repo, remote: Aryan-Is-Here/Debable)
 
 ---
 
-## 4. Everything built so far (Phases 0–6)
+## 4. Everything built so far (Phases 0–7)
 
 ### Phase 0 — Planning ✅
 Repo scaffolded to the blueprint structure; blueprint extracted into `docs/`; git + GitHub wired; root `.gitignore` (Node+Python+env) and README. Opinionated configs (linters, CI, Docker) deliberately deferred to their phases.
@@ -211,6 +213,24 @@ inside the built `api` image.
     check that passed, because that check ran with both cameras on. They surfaced in Phase 6
     only because someone happened to have a camera off. When verifying by hand, toggle the
     optional things — camera, mic, one tab closed — not just the happy path.
+25. **⚠️ Verify a third party's free tier with a real call before designing around it.** In
+    Phase 7 the published documentation was wrong twice, in ways that would each have broken
+    the design at integration time: `gemini-2.5-flash` is listed with a free grounding quota
+    but returns `404 no longer available to new users`, and every 3.x model lists grounding as
+    unavailable *and* 429s on the first call. One throwaway script cost one request and saved
+    a rewrite. This is the Phase 5 lesson (validate LiveKit credentials before building on
+    them) generalised, and Phase 7 had to learn it twice.
+26. **Development only works on `http://localhost:3000`.** A LAN address or `127.0.0.1`
+    breaks three things at once: Clerk never loads (the dev instance is bound to specific
+    origins), CORS blocks the API, and the chat socket's `Origin` check refuses the
+    handshake. `useAuthReady` now explains the first one rather than spinning forever, but
+    the address is still the fix. To serve another device, update `CORS_ORIGINS`,
+    `NEXT_PUBLIC_API_BASE_URL` and Clerk's allowed origins together.
+27. **Clerk cannot say "I will never load".** `useAuth` has only *loading* and
+    *loaded-with-an-answer*, so `!isLoaded ? spinner : …` spins forever when anything upstream
+    is wrong. Use `useAuthReady` from `frontend/hooks/use-auth-ready.ts`, which adds
+    `stalled`. Its `stalled` is **derived** (`!isLoaded && timedOut`) rather than reset in an
+    effect — clearing it there is a synchronous setState in an effect body (§5.3).
 
 ### How to run the frontend
 ```bash
@@ -230,7 +250,7 @@ cp .env.example .env      # first time only
 uv sync                   # first time only
 uv run alembic upgrade head
 uv run python -m app      # http://localhost:8000 — docs at /docs
-uv run pytest             # 136 tests; 99 SKIP without Postgres — always check the skip count
+uv run pytest             # 216 tests; most SKIP without Postgres — always check the skip count
 ```
 Whole stack in containers instead: `docker compose -f docker/docker-compose.yml up -d --build`.
 
@@ -242,7 +262,7 @@ Whole stack in containers instead: `docker compose -f docker/docker-compose.yml 
 | Decision | Detail |
 |---|---|
 | Auth = Clerk | Client-side login UI from Clerk; backend verifies Clerk-issued JWTs; `POST /auth/login` from doc 05 is **dropped** (done — no such endpoint exists) |
-| AI service isolation | Backend calls AI over HTTP; AI never listens continuously; LLM default = Anthropic Claude |
+| AI service isolation | Backend calls AI over HTTP; AI never listens continuously. **LLM default was Anthropic Claude; superseded in Phase 7 by Google Gemini** — the project has no budget, and Claude has no free tier. The isolation property is unchanged: `app/ai/` is a client, only the submitted claim crosses the boundary, and everything sits behind a `FactCheckProvider` protocol so the provider is a one-file swap (it has already changed twice) |
 | Frontend stack details | See §2/§5 — base-nova, npm, no src/ dir, `@/*` alias |
 | Backend stack details | uv + Python 3.11, async SQLAlchemy 2 over psycopg 3, ruff, pytest; API versioned under `/api/v1` |
 | Progress reports | A cumulative report is written to `docs/progress/` at the **start of every phase** and committed |
@@ -343,67 +363,92 @@ posted *into* the chat.
 
 ---
 
-## 7. How to continue — Phase 7 in extreme detail
+### Phase 7 — AI Fact Check ✅ (branch `feature/fact-check`)
 
-**Goal:** The on-demand AI fact-check — the feature the whole product exists to test. Either
-debater submits one specific claim mid-debate, the backend sends *only that claim* to an
-isolated AI service, and the verdict is posted into the chat both people are already reading.
+The differentiator: either debater submits one claim, it is checked against trusted sources,
+and the verdict is pushed into the chat both people are already reading.
 
-**Branch:** `feature/fact-check`
+| Area | What exists |
+|---|---|
+| Retrieval | **Ours, not the model's.** `app/search/` — Tavily when `TAVILY_API_KEY` is set (1,000/month free, no card), Wikipedia when it is not (no account at all) |
+| Judgment | `app/ai/gemini.py` — Gemini 3.6 Flash, structured JSON output, `temperature=0` |
+| Trust boundary | `app/core/sources.py`. With Tavily it is enforced **at retrieval** via `include_domains` + `include_domains_mode="filter"`; the service-layer filter then runs as defence in depth |
+| Citations | Cannot be invented — the model picks from numbered sources by index, and out-of-range indices are discarded |
+| Endpoints | `POST /rooms/{id}/fact-check`, `GET /rooms/{id}/fact-checks`, plus a `fact_check` socket frame broadcast to both debaters |
+| Limits | Per-room hourly **and** a global daily budget, both counted from the `fact_checks` table so they survive restarts and multiple workers |
+| Tests | 27 new (216 total, 0 skipped). **None touch a network** |
+
+**Three configurations, each degrading to something needing no credentials:** no keys → stub
+verdicts (the whole flow still works on a fresh clone); `GEMINI_API_KEY` → real verdicts from
+Wikipedia; `+ TAVILY_API_KEY` → the full allowlist. Nothing downstream changes at any step.
+
+**The rule the phase is built around:** `UNVERIFIED` is a *verdict* — checked, nothing
+settles it. `FactCheckUnavailable` is an *error* — never checked. They must never collapse
+into one another: recording failures as `unverified` would fill the dataset with claims
+nobody examined, persisted and indistinguishable from real results. A failed check stores
+nothing.
+
+**What the plan got wrong, and how.** The phase chose Anthropic, then Gemini-with-grounding,
+and shipped neither — the provider changed twice before a line of the service layer existed.
+Free Google Search grounding is unobtainable: `gemini-2.5-flash` is 404 for new users, and
+3.x grounding is a zero quota that 429s on the first call. Only a real API call showed this;
+the pricing page said otherwise. See §5.25.
+
+Being forced to retrieve separately **improved** the design: the allowlist became a retrieval
+constraint rather than a citation filter, and with no tool in the request, structured output
+works.
+
+**Two more bugs found by running it:** Wikimedia enforces its User-Agent policy (a generic
+agent gets a 403), and Wikipedia was missing from the trusted-source allowlist — a test
+actively asserted it was untrusted — so every Wikipedia-backed verdict was silently
+downgraded to `unverified`.
+
+**Verified live:** *"The Great Depression began with a stock market crash in 1929"* → `true`,
+citing real articles. Confirmed by hand in two windows.
+
+---
+
+## 7. How to continue — Phase 8 in extreme detail
+
+**Goal:** Ratings. The last mock data in the product, and the instrument that records
+whether a debate went well.
+
+**Branch:** `feature/ratings`
 
 ### What is already in place
-- `app/ai/` is empty and scaffolded for exactly this. `FactCheck` and `FactCheckVerdict`
-  exist in `app/models/fact_check.py`, with `sources` as JSONB and an `explanation` column
-  the UI already renders.
-- Chat is real, so there is somewhere for a verdict to land. `chat_registry.broadcast()` in
-  `app/websocket/registry.py` is how it gets to both windows.
-- The frontend already has `FactCheckDialog` and `FactCheckCard`; `mockFactCheck` in
-  `lib/mock/debate.ts` is the only thing standing in for the service.
+The schema does most of the work. `app/models/rating.py` already carries a `UniqueConstraint`
+on `(room_id, reviewer_id)`, a `CheckConstraint` for the 1–5 range, and another forbidding
+self-review. So the service translates an `IntegrityError` into a clean 409 rather than
+re-checking — the same shape `match.join` already uses. `RatingForm` exists and has been
+rendering since Phase 1.
 
-### Decide before writing code
-1. **How the verdict reaches the chat.** A fact-check is not a `messages` row — `sender_id`
-   is `NOT NULL` and references `users`, so a "system" message has no author to point at.
-   Either add a nullable `sender_id` plus a kind discriminator to `messages` (a migration),
-   or broadcast fact-checks as their own frame type and have the client interleave them the
-   way `debate-room-view.tsx` already interleaves the mock ones. **Prefer the second** — it
-   needs no migration and keeps two genuinely different things apart — but note that
-   fact-checks then do not appear in `GET /rooms/{id}/messages`, so the room needs a
-   `GET /rooms/{id}/fact-checks` for reloads to show them.
-2. **Where the AI service lives.** Doc 10 has it as a separate service the backend calls over
-   HTTP, never listening continuously. Keep that boundary: `app/ai/` is a *client*, and the
-   claim is the only thing that crosses it.
-3. **What happens when the AI is slow or down.** A fact-check is a request against a third
-   party with real latency. It must not block the socket's receive loop — dispatch it and
-   broadcast when it returns — and a failure needs a visible verdict of its own rather than
-   silence.
+### The three remaining mock call-sites
+- `app/debate/[roomId]/results/page.tsx` — uses `mockDebateRoom` for **any** roomId, so
+  rating currently "works" while rating nothing. Load the real room via `getRoom`, exactly as
+  `components/debate-room-loader.tsx` does.
+- `app/profile/page.tsx` — `mockProfile`. Debates count and average rating become real.
+- `components/settings-view.tsx` — `currentUser`. Read from Clerk instead.
 
 ### Step-by-step
-4. **Client** (`app/ai/`): a typed client for the AI service, timeouts explicit, failures
-   raised as `ServiceUnavailableError` so the existing error envelope covers them.
-5. **Service** (`app/services/fact_check.py`): guard with the same participant check as chat
-   (`to_room_read()`), reject ended rooms, persist the `FactCheck` row, then broadcast.
-6. **Endpoint:** `POST /api/v1/rooms/{id}/fact-check`. A POST because it creates a record and
-   costs money — it must never be retried automatically or prefetched.
-7. **Rate limiting.** One claim at a time per room, at minimum. The MVP has no abuse story and
-   this endpoint is the expensive one.
-8. **Tests:** a non-participant is refused; an ended room is refused; the AI client is stubbed
-   rather than called; a verdict is persisted and broadcast to both sockets; an AI failure
-   produces a refusal, not a hang.
-9. **Frontend:** replace `mockFactCheck` in `debate-room-view.tsx` with a mutation, and take
-   fact-checks from the server instead of local state.
-10. **Verify:** a claim submitted in one window produces a verdict card in *both*, and it is
-    still there after a reload.
-11. **Commit → push → merge** when green.
+1. `app/repositories/rating.py` and `app/services/rating.py`. Guard with `to_room_read()`
+   from `app/services/match.py`, as chat and fact-check both do.
+2. `POST /rooms/{id}/rating`.
+3. Wire `RatingForm`; load the real room on the results page.
+4. Real profile stats.
+5. Tests: a participant may rate once; a second attempt is 409; a non-participant is 403;
+   self-rating is refused; a score outside 1–5 is 422.
 
-### Before you start
-Read §5.14–5.19 and §7 of `docs/COMPLETE-PROGRESS-REPORT.md`. Two of those apply immediately:
-the connection registry is per-worker (§5.18), so a broadcast verdict has the same deployment
-constraint chat does; and instrument before guessing (§5.16) — an AI call that is merely slow
-looks exactly like one that is broken.
+### A note on the project's goal
+`docs/01-product-vision.md` states the MVP success metric as *"two strangers can successfully
+debate and use AI fact-checking during the conversation"* — a **capability** metric, met by
+Phase 7. The handoff framing, *"can fact-checking improve debates?"*, is an **outcome**
+question that nothing currently measures.
 
-### Phases 7–10 (summary map)
-- **Phase 7 AI Fact Check:** isolated `app/ai/` service client + separate AI service (RAG over trusted sources, Claude); `POST /room/{id}/fact-check`; result broadcast into chat; replace `mockFactCheck`.
-- **Phase 8 Ratings:** `POST /room/{id}/rating`; wire RatingForm; the one-rating-per-reviewer-per-room rule is already in the schema.
+Phase 8 does not have to answer it, and by decision it does not. But it should not foreclose
+it either: `ratings.room_id` and `fact_checks.room_id` join on the same room, so "debates
+with a fact-check versus without" stays a query rather than a migration. Keep it that way.
+
+### Phases 9–10 (summary map)
 - **Phase 9 Polish & Deploy:** resolve conflict #1 (Reports); `POST /report` + minimal UI; deploy per doc 09; a11y/dark-mode/QA pass.
 - **Phase 10 Professional UI/UX Redesign:** the full visual overhaul, deliberately last.
 

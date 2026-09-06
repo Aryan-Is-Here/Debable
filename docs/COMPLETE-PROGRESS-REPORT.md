@@ -1,7 +1,7 @@
 # Debable — Complete Progress Report
 
 **Written:** 2026-08-14 · **Updated:** 2026-08-15 · **Repository:** https://github.com/Aryan-Is-Here/Debable
-**State:** Phases 0–6 merged to `main`. Phase 7 (AI Fact Check) is next.
+**State:** Phases 0–7 merged to `main`. Phase 8 (Ratings) is next.
 
 This is the full narrative: what the product is, how it has been built, why every tool was
 chosen over its alternatives, what remains, and what will bite you. Companion documents:
@@ -267,14 +267,44 @@ messages are committed before they are broadcast.
 
 ---
 
-## 5. What remains
+### Phase 7 — AI Fact Check ✅
 
-### Phase 7 — AI Fact Check
-The differentiator. Isolated `app/ai/` client plus a separate AI service doing RAG over trusted
-sources with Claude. `POST /room/{id}/fact-check`, result broadcast into chat, replacing
-`mockFactCheck`. Watch for: latency (the user is mid-conversation), hallucinated sources —
-citations must be real and load — and cost per call. The verdict vocabulary
-(`true`/`false`/`misleading`/`unverified`) is already fixed in the schema and the frontend.
+The differentiator, and the phase where the published documentation was wrong twice.
+
+The plan chose Anthropic for its server-side web search, then Gemini for its free Google
+Search grounding. **Neither shipped.** `gemini-2.5-flash`, the only model the pricing page
+grants free grounding, returns *404: no longer available to new users*; every 3.x model
+returns *429 RESOURCE_EXHAUSTED on the first call* — a zero quota, matching the "Grounding:
+Not available" the same page shows on every free row. Plain generation works fine, so the key
+was healthy and only retrieval was closed.
+
+The provider therefore changed twice before a line of the service layer existed, which is the
+strongest argument imaginable for the `FactCheckProvider` protocol written first. The guards,
+the rate limits and the persistence never changed at all.
+
+**Being forced to retrieve separately made the design better**, on the two axes that matter:
+the allowlist became a constraint on what is *fetched* rather than a filter on what is
+*cited*, so an untrusted page is never read; and with no tool in the request, structured JSON
+output works, so the verdict is parsed rather than scraped out of prose. Citations became
+impossible to invent — the model selects from numbered sources by index, and out-of-range
+indices are discarded.
+
+The rule the phase was built around is enforced in the type system: `UNVERIFIED` is a
+**verdict** (checked, nothing settles it); `FactCheckUnavailable` is an **error** (never
+checked). Collapsing them would fill the dataset with claims nobody examined, persisted and
+indistinguishable from real results. A failed check stores nothing.
+
+**Two more bugs found by running it, not reading about it:** Wikimedia enforces its
+User-Agent policy, and Wikipedia was missing from the trusted-source allowlist — a test
+actively asserted it was untrusted — so every Wikipedia-backed verdict was silently
+downgraded to `unverified`.
+
+**Verified live and by hand:** a claim produces the same verdict card in both windows with
+citations that resolve, and it survives a reload.
+
+---
+
+## 5. What remains
 
 ### Phase 8 — Ratings
 `POST /room/{id}/rating`, wire `RatingForm`. The one-rating-per-reviewer-per-room rule already
@@ -283,10 +313,21 @@ clean error.
 
 ### Phase 9 — Polish & Deploy
 Resolves **conflict #1**: the Reports feature has no table in doc 04 — add
-`reports(id, room_id, reporter_id, reported_user_id, reason, created_at)`. Then deploy per doc
-09: Vercel (frontend), Railway or Fly.io (backend), Neon or Supabase (Postgres), LiveKit Cloud.
+`reports(id, room_id, reporter_id, reported_user_id, reason, created_at)`. This is the **only
+migration left in the project**.
+
+Then deploy. Doc 09 names Vercel (frontend), Railway or Fly.io (backend), Neon or Supabase
+(Postgres) and LiveKit Cloud — but **verify those free tiers with real signups at the time
+rather than planning around them now.** Two free tiers closed underneath this project during
+Phase 7 alone, and the published pricing pages were wrong about both.
+
+**Hard constraint:** the chat connection registry is per-process, so two debaters served by
+different workers would see none of each other's messages. Pin the API to one worker or add a
+broker. Messages are committed before broadcast, so the failure mode is "needs a reload", not
+"lost".
 Create **production** Clerk and LiveKit instances — the current ones are development
-instances with usage limits and a browser warning.
+instances with usage limits and a browser warning, and the Clerk one is bound to
+`localhost:3000`.
 
 ### Phase 10 — Professional UI/UX Redesign
 Full visual and interaction overhaul, at Aryan's request, deliberately **last**. Redesigning
@@ -300,9 +341,14 @@ shape in Phases 5, 6 and 7. Until then, judge work on whether it functions, not 
 | # | Gap | Phase |
 |---|---|---|
 | 1 | Reports feature has no DB table in doc 04 | 9 |
-| 3 | Chat transport: doc 05 says REST, structure has `websocket/` | 6 |
 
-Resolved: #2 and #7 (Phase 4), #4 and #5 (Phase 2), #6 and #8 (Phase 3).
+**#1 is the last one.** Resolved: #3 (Phase 6), #2 and #7 (Phase 4), #4 and #5 (Phase 2),
+#6 and #8 (Phase 3).
+
+One locked decision was also **superseded** rather than resolved: Phase 0 fixed the LLM
+default as Anthropic Claude, and Phase 7 replaced it with Google Gemini because the project
+has no budget and Claude has no free tier. The isolation property that decision existed to
+protect is unchanged.
 
 ---
 
@@ -354,6 +400,15 @@ itself; any future socket must too.
 a meaningful tiebreak or `clock_timestamp()`, or rows written together come back in arbitrary
 order.
 
+**Verify a third party's free tier with a real call before designing around it.** Phase 7's
+published documentation was wrong twice — a model listed with a free grounding quota was 404
+for new users, and the replacement had a zero quota that 429'd on the first request. One
+throwaway script cost one API request and saved a rewrite.
+
+**Development only works on `http://localhost:3000`.** A LAN address or `127.0.0.1` breaks
+Clerk, CORS and the chat socket's Origin check simultaneously. It presents as an eternal
+spinner with no sign-in button and a poll that never runs.
+
 **base-nova is not Radix.** Compose with the `render` prop, never `asChild`. Use `ButtonLink`
 for navigation and `Button` for actions.
 
@@ -373,7 +428,7 @@ The LiveKit secret is a signing key — the browser only ever receives a minted 
 
 | Area | Evidence |
 |---|---|
-| Backend suite | 136 tests pass, 0 skipped, including concurrent pairing, queue liveness, token grants and two sockets exchanging messages in one room |
+| Backend suite | 216 tests pass, 0 skipped. None touch a network — the fact-check provider and search backends are stubbed |
 | Lint/format | `ruff check`, `ruff format --check`, `eslint` all clean |
 | Build | `npm run build` compiles all 9 routes, no type errors |
 | Migrations | `alembic check` reports no drift; up/down round trip verified |
@@ -381,4 +436,5 @@ The LiveKit secret is a signing key — the browser only ever receives a minted 
 | Topics | Confirmed by hand: a topic created in the UI survives a reload |
 | Matchmaking | Confirmed by hand: two accounts, two windows, both flip to matched, same room |
 | Video | Confirmed by hand: two accounts see and hear each other. Camera-off and mute state both cross correctly as of `85f1dd0` — before that, neither did |
+| Fact-check | 27 automated tests, none touching a network. Confirmed by hand: a verdict appears in both windows with citations that resolve, and survives a reload |
 | Chat | 27 automated tests including two sockets in one room; refusals (bad token, silence, disallowed origin) confirmed against the running server. **Confirmed by hand:** messages cross both ways without a refresh and survive a reload |

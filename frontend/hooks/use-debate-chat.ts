@@ -12,6 +12,7 @@ import {
   type ServerFrame,
   type WireMessage,
 } from "@/services/chat";
+import { getFactChecks, toFactCheck, type WireFactCheck } from "@/services/fact-check";
 
 export type ChatStatus =
   | "connecting"
@@ -44,7 +45,10 @@ function isRefusal(code: number): boolean {
   return code >= 4400 && code < 4500;
 }
 
-function byTimeThenId(a: WireMessage, b: WireMessage): number {
+function byTimeThenId(
+  a: { createdAt: string; id: string },
+  b: { createdAt: string; id: string },
+): number {
   if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? -1 : 1;
   return a.id < b.id ? -1 : 1;
 }
@@ -70,6 +74,7 @@ export function useDebateChat(roomId: string): DebateChat {
   const getTokenRef = useRef(getToken);
 
   const [wireMessages, setWireMessages] = useState<WireMessage[]>([]);
+  const [wireFactChecks, setWireFactChecks] = useState<WireFactCheck[]>([]);
   const [status, setStatus] = useState<ChatStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [youId, setYouId] = useState<string | null>(null);
@@ -93,6 +98,7 @@ export function useDebateChat(roomId: string): DebateChat {
     // buffered rather than dropped, so nothing sent during the fetch goes missing.
     let historyLoaded = false;
     let buffered: WireMessage[] = [];
+    let bufferedFactChecks: WireFactCheck[] = [];
 
     function merge(incoming: WireMessage[]) {
       if (incoming.length === 0) return;
@@ -112,14 +118,37 @@ export function useDebateChat(roomId: string): DebateChat {
       setLastEventAt(Date.now());
     }
 
+    function mergeFactChecks(incoming: WireFactCheck[]) {
+      if (incoming.length === 0) return;
+      setWireFactChecks((previous) => {
+        const byId = new Map(previous.map((check) => [check.id, check]));
+        let added = false;
+        for (const check of incoming) {
+          if (byId.has(check.id)) continue;
+          byId.set(check.id, check);
+          added = true;
+        }
+        if (!added) return previous;
+        return [...byId.values()].sort(byTimeThenId);
+      });
+      setLastEventAt(Date.now());
+    }
+
     async function loadHistory() {
       try {
         const token = await getTokenRef.current();
-        const history = await getMessages(roomId, token);
+        // Both transcripts, in parallel. Fact-checks live in their own table and endpoint —
+        // see `app/schemas/chat.py` for why they are not messages.
+        const [history, factChecks] = await Promise.all([
+          getMessages(roomId, token),
+          getFactChecks(roomId, token),
+        ]);
         if (cancelled) return;
         historyLoaded = true;
         merge([...history, ...buffered]);
+        mergeFactChecks([...factChecks, ...bufferedFactChecks]);
         buffered = [];
+        bufferedFactChecks = [];
       } catch {
         // Leave `historyLoaded` false so the next `ready` tries again; live messages keep
         // buffering meanwhile rather than rendering a transcript with a hole in it.
@@ -139,6 +168,7 @@ export function useDebateChat(roomId: string): DebateChat {
         attempt = 0;
         historyLoaded = false;
         buffered = [];
+        bufferedFactChecks = [];
         setYouId(frame.userId);
         setStatus("connected");
         setError(null);
@@ -149,6 +179,12 @@ export function useDebateChat(roomId: string): DebateChat {
       if (frame.type === "message") {
         if (historyLoaded) merge([frame.message]);
         else buffered.push(frame.message);
+        setLastEventAt(Date.now());
+        return;
+      }
+      if (frame.type === "fact_check") {
+        if (historyLoaded) mergeFactChecks([frame.factCheck]);
+        else bufferedFactChecks.push(frame.factCheck);
         setLastEventAt(Date.now());
         return;
       }
@@ -230,10 +266,30 @@ export function useDebateChat(roomId: string): DebateChat {
     setError(null);
   }, []);
 
-  const messages = useMemo(
-    () => wireMessages.map((message) => toChatMessage(message, youId)),
-    [wireMessages, youId],
-  );
+  /**
+   * The transcript both debaters see: chat and verdicts interleaved by time.
+   *
+   * They arrive on separate endpoints and are stored in separate tables, but they are one
+   * conversation on screen — a verdict only means anything next to the exchange that
+   * prompted it. `ChatMessage` already models a fact-check as a `system` entry, unchanged
+   * from Phase 1.
+   */
+  const messages = useMemo(() => {
+    const chat = wireMessages.map((message) => toChatMessage(message, youId));
+    if (wireFactChecks.length === 0) return chat;
+
+    const verdicts: ChatMessage[] = wireFactChecks.map((check) => ({
+      id: check.id,
+      author: "system",
+      content: "",
+      createdAt: check.createdAt,
+      factCheck: toFactCheck(check),
+    }));
+
+    return [...chat, ...verdicts].sort((a, b) =>
+      a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0,
+    );
+  }, [wireMessages, wireFactChecks, youId]);
 
   /**
    * A silent chat panel looks identical whether the socket is connected, reconnecting, or

@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { SignInButton, useAuth } from "@clerk/nextjs";
 import { AlertCircle, Loader2 } from "lucide-react";
 
+import { AUTH_STALLED_HINT, useAuthReady } from "@/hooks/use-auth-ready";
 import { Button } from "@/components/ui/button";
 import { DebateRoomView } from "@/components/debate-room-view";
 import { ApiError } from "@/services/api-client";
@@ -19,13 +20,29 @@ import { getRoom, matchKeys } from "@/services/match";
  */
 export function DebateRoomLoader({ roomId }: { roomId: string }) {
   const router = useRouter();
-  const { isLoaded, isSignedIn, getToken } = useAuth();
+  const { getToken } = useAuth();
+  const { isLoaded, isSignedIn, signedIn, stalled } = useAuthReady();
 
   const { data: room, isPending, isError, error } = useQuery({
     queryKey: matchKeys.room(roomId),
     queryFn: async () => getRoom(roomId, await getToken()),
-    enabled: isLoaded && isSignedIn === true,
+    enabled: signedIn,
   });
+
+  // Ahead of the signed-out branch: if Clerk never loads, `isLoaded` stays false and this
+  // screen would otherwise spin forever with nothing explaining why.
+  if (stalled) {
+    return (
+      <Centered>
+        <AlertCircle className="size-8 text-destructive" />
+        <p className="font-medium">Sign-in isn&apos;t loading</p>
+        <p className="text-sm text-muted-foreground">{AUTH_STALLED_HINT}</p>
+        <Button variant="outline" onClick={() => window.location.reload()}>
+          Reload
+        </Button>
+      </Centered>
+    );
+  }
 
   if (isLoaded && !isSignedIn) {
     return (

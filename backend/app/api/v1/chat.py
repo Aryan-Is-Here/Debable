@@ -22,6 +22,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.base import FactCheckProvider
+from app.ai.factory import get_fact_check_provider
 from app.auth.clerk import ClerkTokenVerifier, get_token_verifier
 from app.auth.dependencies import CurrentUser
 from app.core.config import Settings, get_settings
@@ -30,13 +32,16 @@ from app.db.session import SessionScope, get_db, get_session_scope
 from app.models.user import User
 from app.schemas.chat import (
     ErrorFrame,
+    FactCheckFrame,
     MessageFrame,
     MessageList,
     ReadyFrame,
     SendMessageFrame,
     client_frame_adapter,
 )
+from app.schemas.fact_check import FactCheckList, FactCheckRead, FactCheckRequest
 from app.services import chat as chat_service
+from app.services import fact_check as fact_check_service
 from app.websocket.auth import authenticate_socket, origin_allowed
 from app.websocket.protocol import CLOSE_FORBIDDEN, close_code_for
 from app.websocket.registry import chat_registry
@@ -68,6 +73,67 @@ async def get_messages(room_id: uuid.UUID, current_user: CurrentUser, db: DbSess
     """
     messages = await chat_service.list_history(db, room_id, current_user)
     return MessageList(messages=messages)
+
+
+@router.get(
+    "/rooms/{room_id}/fact-checks",
+    response_model=FactCheckList,
+    summary="Get a debate's fact-check history",
+    responses={
+        401: {"description": "Missing or invalid Clerk session token."},
+        403: {"description": "You are not a participant in this debate."},
+        404: {"description": "No such room."},
+    },
+)
+async def get_fact_checks(
+    room_id: uuid.UUID, current_user: CurrentUser, db: DbSession
+) -> FactCheckList:
+    """Every verdict in the room, oldest first, so a reload restores them."""
+    fact_checks = await fact_check_service.list_for_room(db, room_id, current_user)
+    return FactCheckList(fact_checks=fact_checks)
+
+
+@router.post(
+    "/rooms/{room_id}/fact-check",
+    response_model=FactCheckRead,
+    summary="Fact-check one claim",
+    responses={
+        401: {"description": "Missing or invalid Clerk session token."},
+        403: {"description": "You are not a participant in this debate."},
+        404: {"description": "No such room."},
+        409: {"description": "The debate has ended."},
+        429: {"description": "Rate limit or daily budget reached."},
+        503: {"description": "The claim could not be checked — this is not a verdict."},
+    },
+)
+async def request_fact_check(
+    room_id: uuid.UUID,
+    payload: FactCheckRequest,
+    current_user: CurrentUser,
+    db: DbSession,
+    settings: Annotated[Settings, Depends(get_settings)],
+    provider: Annotated[FactCheckProvider, Depends(get_fact_check_provider)],
+) -> FactCheckRead:
+    """Check a claim and push the verdict to both debaters.
+
+    A POST over REST rather than a socket frame, deliberately: this call takes seconds and
+    costs a request from a small free-tier budget, so it must not sit inside the socket's
+    receive loop where it would block every message behind it. The socket carries only the
+    broadcast.
+
+    A 503 means the claim could not be checked at all. That is not a verdict, and nothing is
+    stored — see ``app/ai/base.py``.
+    """
+    result = await fact_check_service.request_fact_check(
+        db, room_id, current_user, payload.claim, provider=provider, settings=settings
+    )
+
+    # Best-effort: the verdict is already committed, so a broadcast failure must not fail the
+    # request. The other side picks it up from GET /rooms/{id}/fact-checks on reload.
+    await chat_registry.broadcast(
+        room_id, FactCheckFrame(fact_check=result).model_dump(by_alias=True, mode="json")
+    )
+    return result
 
 
 @router.websocket("/rooms/{room_id}/chat")

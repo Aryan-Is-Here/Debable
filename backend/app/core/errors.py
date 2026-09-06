@@ -55,6 +55,18 @@ class PermissionDeniedError(AppError):
     message = "You do not have access to this resource."
 
 
+class RateLimitError(AppError):
+    """Too many requests — the caller should slow down or wait.
+
+    Distinct from ``ServiceUnavailableError``: this one is the *caller's* doing and is
+    resolved by waiting, so the message should say what the limit was.
+    """
+
+    status_code = 429
+    code = "rate_limited"
+    message = "Too many requests. Try again shortly."
+
+
 class ServiceUnavailableError(AppError):
     status_code = 503
     code = "service_unavailable"
