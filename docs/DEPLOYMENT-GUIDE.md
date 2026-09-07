@@ -45,73 +45,144 @@ a second worker silently breaks chat. Here the free tier enforces the correct de
 
 ---
 
-## 1. Database — Neon
+## Step 0 — Decide names and push the branch
 
-1. Sign up at [neon.tech](https://neon.tech), create a project.
-2. Copy the connection string and **rewrite the driver prefix**: Neon gives you
-   `postgresql://…`, and this application needs `postgresql+psycopg://…`. Everything else in
-   the string, including `?sslmode=require`, stays.
-3. From your machine, run the migrations against it:
+Koyeb needs the Vercel URL and Vercel needs the Koyeb URL. Choosing both names up front
+removes the circularity; otherwise you will deploy twice.
 
-```bash
-cd backend
-DATABASE_URL="postgresql+psycopg://…neon…/debable?sslmode=require" uv run alembic upgrade head
-```
+1. Go to [vercel.com/new](https://vercel.com/new) and check the project name `debable` is
+   available. If it is taken, pick another and substitute it everywhere below.
+2. Write down the two URLs you are committing to:
+   - Frontend: `https://debable.vercel.app`
+   - Backend: `https://debable-api-<your-org-slug>.koyeb.app` (Koyeb appends your org slug;
+     you will see the exact URL after creating the service in Step 2)
+3. Push the branch so the platforms can see it:
 
-Confirm with `alembic current` that it reports `0005`.
+   ```bash
+   git push -u origin feature/polish
+   ```
 
-## 2. Backend — Koyeb
+Deploy from `feature/polish` first, and switch both platforms to `main` after it merges. That
+keeps the merge gated on the deployment actually working.
 
-Create a Web Service from this GitHub repository, Docker build,
-`docker/Dockerfile.backend`, build context the repository **root** (the Dockerfile copies
-`backend/`), port **8000**, health check path `/api/v1/health`.
+---
 
-Environment variables:
+## Step 1 — Neon (database)
 
-```
-ENV=production
-DATABASE_URL=postgresql+psycopg://…neon…?sslmode=require
-CORS_ORIGINS=https://<your-app>.vercel.app
-CLERK_ISSUER=https://<your-instance>.clerk.accounts.dev
-CLERK_AUTHORIZED_PARTIES=https://<your-app>.vercel.app
-LIVEKIT_URL=wss://<your-project>.livekit.cloud
-LIVEKIT_API_KEY=…
-LIVEKIT_API_SECRET=…
-GEMINI_API_KEY=…            # optional; omit for stub verdicts
-TAVILY_API_KEY=…            # optional; omit and evidence comes from Wikipedia
-```
+1. Go to [neon.tech](https://neon.tech) and sign up with GitHub.
+2. Create a project: name it `debable`, Postgres 16 or later, region nearest you.
+3. On the project dashboard find the connection string. It looks like:
+   `postgresql://user:pass@ep-xxx-123.aws.neon.tech/neondb?sslmode=require`
+4. **Change the scheme from `postgresql://` to `postgresql+psycopg://`.** Change nothing
+   else — keep the credentials, the host and `?sslmode=require`. This application uses the
+   async psycopg driver and will not connect without it. This is the single most common way
+   to get stuck here.
+5. Apply the schema from your own machine (Neon has no shell):
 
-`ENV=production` disables `/docs` and `/openapi.json` — see `app/main.py`.
+   ```bash
+   cd backend
+   DATABASE_URL="postgresql+psycopg://USER:PASS@HOST/neondb?sslmode=require" uv run alembic upgrade head
+   ```
 
-⚠️ **`CORS_ORIGINS` is also read by the chat socket's `Origin` check**
-(`app/websocket/auth.py`). Getting CORS right for REST but forgetting the socket produces a
-working app with silently broken chat. It is one variable; just do not omit the Vercel URL.
+6. **Verify before moving on.** This must print `0005`:
 
-You will not know the Vercel URL until step 3, so set these two after, or set them now if you
-have already reserved the project name.
+   ```bash
+   cd backend
+   DATABASE_URL="postgresql+psycopg://USER:PASS@HOST/neondb?sslmode=require" uv run alembic current
+   ```
 
-## 3. Frontend — Vercel
+   If it prints nothing, the migrations did not run. If it errors on the driver, revisit 4.
 
-Import the repository, root directory `frontend`.
+---
 
-```
-NEXT_PUBLIC_API_BASE_URL=https://<your-service>.koyeb.app/api/v1
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_…
-CLERK_SECRET_KEY=sk_test_…
-```
+## Step 2 — Koyeb (backend)
 
-Note `pk_test_`/`sk_test_` — **development** keys, deliberately. Production keys will not work
-on a `vercel.app` domain.
+1. Go to [koyeb.com](https://www.koyeb.com) and sign up with GitHub. A card is usually not
+   required; if it asks, that is its human-verification path.
+2. **Create Web Service** → source **GitHub** → authorise Koyeb for
+   `Aryan-Is-Here/Debable` → branch **`feature/polish`**.
+3. Builder: choose **Dockerfile** (not Buildpack).
+   - Dockerfile location: `docker/Dockerfile.backend`
+   - Work directory: **leave empty.** The Dockerfile copies `backend/` relative to the
+     repository root, so setting this breaks the build.
+4. Instance: **Free** (512 MB / 0.1 vCPU). Region: Washington DC or Frankfurt — the free tier
+   allows no others.
+5. Exposed port: **8000**. Health check: HTTP on `/api/v1/health`.
+6. Scaling: leave at **1 instance**. ⚠️ Not a default worth raising — see the `CMD` comment in
+   `docker/Dockerfile.backend`. More than one process silently breaks chat.
+7. Service name: `debable-api`.
+8. Add the environment variables (values marked `<copy>` come from your `backend/.env`):
 
-## 4. Clerk
+   ```
+   ENV=production
+   DATABASE_URL=postgresql+psycopg://…your Neon string…?sslmode=require
+   CORS_ORIGINS=https://debable.vercel.app
+   CLERK_ISSUER=https://distinct-kitten-15.clerk.accounts.dev
+   CLERK_AUTHORIZED_PARTIES=https://debable.vercel.app
+   LIVEKIT_URL=wss://debable-zm0l0fu7.livekit.cloud
+   LIVEKIT_API_KEY=<copy>
+   LIVEKIT_API_SECRET=<copy>
+   GEMINI_API_KEY=<copy>
+   ```
 
-Add `https://<your-app>.vercel.app` to the development instance's allowed origins. Nothing
-else changes; the dev instance keeps working.
+   Mark `DATABASE_URL`, `LIVEKIT_API_SECRET` and `GEMINI_API_KEY` as secrets if Koyeb offers
+   the choice.
+9. Deploy, and watch the build log. First build takes a few minutes.
+10. **Verify before moving on.** Note your real URL from the dashboard, then:
 
-## 5. LiveKit
+    ```bash
+    curl https://debable-api-YOURORG.koyeb.app/api/v1/health
+    ```
 
-Reuse the existing project — LiveKit has no development/production split, only projects. Check
-Settings → Project for your current limits.
+    Expect `{"status":"ok","database":"ok","env":"production",...}`.
+    - `database` not `ok` → the Neon URL is wrong, usually the missing `+psycopg`.
+    - No response at all → check the build log and that the exposed port is 8000.
+
+---
+
+## Step 3 — Vercel (frontend)
+
+1. Go to [vercel.com/new](https://vercel.com/new), sign in with GitHub, import
+   `Aryan-Is-Here/Debable`.
+2. **Root Directory: `frontend`.** ⚠️ The most-missed setting here — the repository root has
+   no `package.json`, so the build fails immediately without it.
+3. Framework preset should auto-detect as Next.js. Leave the build and output settings alone.
+4. Project name: `debable`, matching what you reserved in Step 0.
+5. Environment variables (copy the two Clerk values from your `frontend/.env.local`, where
+   they already exist):
+
+   ```
+   NEXT_PUBLIC_API_BASE_URL=https://debable-api-YOURORG.koyeb.app/api/v1
+   NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_…
+   CLERK_SECRET_KEY=sk_test_…
+   ```
+
+   Note the `/api/v1` suffix on the API URL, and note `pk_test_`/`sk_test_` — **development**
+   keys, deliberately. Production keys are rejected on a `vercel.app` domain.
+6. Deploy. If the branch is not `feature/polish`, set it under Settings → Git and redeploy.
+7. **Verify before moving on:** the site loads and renders the header. Sign-in will not work
+   yet — that is Step 4.
+
+---
+
+## Step 4 — Clerk
+
+1. Go to [dashboard.clerk.com](https://dashboard.clerk.com) and select the
+   `distinct-kitten-15` development instance.
+2. Find where allowed origins/domains are configured (**Configure → Domains**, or Paths; the
+   label moves between Clerk releases).
+3. Add `https://debable.vercel.app`.
+4. **Verify:** reload the deployed site. The **Sign in** button should now appear in the
+   header. If it does not within ~8 seconds you will see "Sign-in isn't loading" instead —
+   that message exists precisely for this misconfiguration.
+
+---
+
+## Step 5 — LiveKit
+
+Nothing to change. LiveKit has no development/production split, so the existing project works
+as-is. Check Settings → Project for your current limits if you want to see the Build plan
+allowances.
 
 ---
 
