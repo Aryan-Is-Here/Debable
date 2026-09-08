@@ -42,3 +42,8 @@ Thumbs.db
 dist/
 build/
 *.log
+
+# ---- Local deployment notes ----
+# Holds a live database connection string while deploying. Never commit it: this
+# repository is public, and one `git add -A` would publish the credential.
+docs/DEPLOY-WORKSHEET.md
